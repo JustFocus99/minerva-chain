@@ -10,4 +10,3 @@ impl From<PrimitiveError> for StateError {
         Self::Primitive(value)
     }
 }
-

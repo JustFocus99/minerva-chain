@@ -1,5 +1,5 @@
 use crate::error::StateError;
-use primitives::{amount, ids, Nonce};
+use primitives::{Nonce, amount, ids};
 
 pub struct Account {
     pub id: ids::AccountId,

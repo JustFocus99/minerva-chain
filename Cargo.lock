@@ -15,10 +15,6 @@ name = "execution"
 version = "0.1.0"
 
 [[package]]
-name = "minerva-chain"
-version = "0.1.0"
-
-[[package]]
 name = "primitives"
 version = "0.1.0"
 

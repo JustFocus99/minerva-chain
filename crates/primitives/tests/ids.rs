@@ -1,6 +1,5 @@
-use primitives::amount::Amount;
 use primitives::error::PrimitiveError;
-use primitives::ids::{account_id_from_bytes, AccountId};
+use primitives::ids::{account_id_from_bytes};
 
 #[test]
 fn valid_32_byte_account_id_creation_works() {
