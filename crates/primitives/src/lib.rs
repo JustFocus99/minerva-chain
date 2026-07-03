@@ -1,14 +1,14 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod amount;
+pub mod error;
+pub mod hash;
+pub mod ids;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use amount::Amount;
+pub use hash::{BlockHash, StateCommitment};
+pub use ids::{AccountId, TransactionId, ValidatorId};
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+/// A monotonically increasing height for blocks.
+pub type Nonce = u64;
+
+/// A monotonically increasing counter for account transactions.
+pub type BlockHeight = u64;
