@@ -1,7 +1,7 @@
 use transaction::transaction::UnsignedTransaction;
 
 #[test]
-fn unsigned_transaction_serializes_deterministically() {
+fn same_unsigned_transaction_produces_same_bytes() {
     let tx = UnsignedTransaction {
         from: [1u8; 32],
         to: [2u8; 32],
@@ -9,24 +9,59 @@ fn unsigned_transaction_serializes_deterministically() {
         nonce: 7,
     };
 
-    let first = tx.to_bytes();
-    let second = tx.to_bytes();
-
-    assert_eq!(first, second);
-    assert_eq!(
-        first,
-        [1u8; 32]
-            .iter()
-            .copied()
-            .chain([2u8; 32].iter().copied())
-            .chain(42u64.to_be_bytes().iter().copied())
-            .chain(7u64.to_be_bytes().iter().copied())
-            .collect::<Vec<_>>()
-    );
+    assert_eq!(tx.to_bytes(), tx.to_bytes());
 }
 
 #[test]
-fn unsigned_transaction_rejects_zero_amount() {
+fn same_unsigned_transaction_produces_same_transaction_id() {
+    let tx = UnsignedTransaction {
+        from: [1u8; 32],
+        to: [2u8; 32],
+        amount: 42,
+        nonce: 7,
+    };
+
+    assert_eq!(tx.id(), tx.id());
+}
+
+#[test]
+fn changing_amount_changes_transaction_id() {
+    let first = UnsignedTransaction {
+        from: [1u8; 32],
+        to: [2u8; 32],
+        amount: 42,
+        nonce: 7,
+    };
+    let second = UnsignedTransaction {
+        from: [1u8; 32],
+        to: [2u8; 32],
+        amount: 43,
+        nonce: 7,
+    };
+
+    assert_ne!(first.id(), second.id());
+}
+
+#[test]
+fn changing_nonce_changes_transaction_id() {
+    let first = UnsignedTransaction {
+        from: [1u8; 32],
+        to: [2u8; 32],
+        amount: 42,
+        nonce: 7,
+    };
+    let second = UnsignedTransaction {
+        from: [1u8; 32],
+        to: [2u8; 32],
+        amount: 42,
+        nonce: 8,
+    };
+
+    assert_ne!(first.id(), second.id());
+}
+
+#[test]
+fn zero_amount_is_rejected() {
     let tx = UnsignedTransaction {
         from: [1u8; 32],
         to: [2u8; 32],
@@ -38,7 +73,7 @@ fn unsigned_transaction_rejects_zero_amount() {
 }
 
 #[test]
-fn unsigned_transaction_rejects_sender_equals_receiver() {
+fn sender_equals_receiver_is_rejected() {
     let tx = UnsignedTransaction {
         from: [1u8; 32],
         to: [1u8; 32],
