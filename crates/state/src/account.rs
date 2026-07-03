@@ -1,5 +1,4 @@
-use crate::error::StateError;
-use primitives::{Nonce, amount, ids};
+use primitives::{Nonce, amount, error::PrimitiveError, ids};
 
 pub struct Account {
     pub id: ids::AccountId,
@@ -20,12 +19,12 @@ impl Account {
         self.nonce += 1;
     }
 
-    pub fn deposit(&mut self, amount: amount::Amount) -> Result<(), StateError> {
+    pub fn deposit(&mut self, amount: amount::Amount) -> Result<(), PrimitiveError> {
         self.balance = amount::checked_add_amount(self.balance, amount)?;
         Ok(())
     }
 
-    pub fn withdraw(&mut self, amount: amount::Amount) -> Result<(), StateError> {
+    pub fn withdraw(&mut self, amount: amount::Amount) -> Result<(), PrimitiveError> {
         self.balance = amount::checked_sub_amount(self.balance, amount)?;
         Ok(())
     }

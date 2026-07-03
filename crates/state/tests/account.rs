@@ -1,6 +1,5 @@
+use primitives::error::PrimitiveError;
 use state::account::Account;
-use state::error::StateError;
-
 #[test]
 fn account_starts_with_expected_balance() {
     let account = Account::new([7u8; 32], 42);
@@ -31,10 +30,7 @@ fn debit_decreases_balance() {
 fn debit_rejects_insufficient_balance() {
     let mut account = Account::new([7u8; 32], 10);
     let err = account.withdraw(11).unwrap_err();
-    assert_eq!(
-        err,
-        StateError::Primitive(primitives::error::PrimitiveError::AmountUnderflow)
-    );
+    assert_eq!(err, PrimitiveError::AmountUnderflow);
 }
 
 #[test]
@@ -48,10 +44,7 @@ fn failed_debit_does_not_mutate_balance() {
 fn credit_rejects_overflow() {
     let mut account = Account::new([7u8; 32], u64::MAX);
     let err = account.deposit(1).unwrap_err();
-    assert_eq!(
-        err,
-        StateError::Primitive(primitives::error::PrimitiveError::AmountOverflow)
-    );
+    assert_eq!(err, PrimitiveError::AmountOverflow);
 }
 
 #[test]
