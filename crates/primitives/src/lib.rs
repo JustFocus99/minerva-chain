@@ -7,6 +7,12 @@ pub use amount::Amount;
 pub use hash::{BlockHash, StateCommitment};
 pub use ids::{AccountId, TransactionId, ValidatorId};
 
+/// A 32-byte public key representation.
+pub type PublicKeyBytes = [u8; 32];
+
+/// A 64-byte signature representation.
+pub type SignatureBytes = [u8; 64];
+
 /// A monotonically increasing height for blocks.
 pub type Nonce = u64;
 
