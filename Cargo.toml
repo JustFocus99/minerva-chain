@@ -4,3 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+[workspace]
+members = [
+    "crates/primitives",
+    "crates/crypto",
+    "crates/state",
+    "crates/transaction",
+    "crates/execution",
+    "crates/block",
+]
+resolver = "2"
