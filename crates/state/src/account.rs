@@ -1,5 +1,6 @@
 use primitives::{Nonce, amount, error::PrimitiveError, ids};
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Account {
     pub id: ids::AccountId,
     pub balance: amount::Amount,

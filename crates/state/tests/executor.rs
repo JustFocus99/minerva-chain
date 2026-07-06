@@ -1,4 +1,5 @@
-use state::{account::Account, ChainState};
+use state::account::Account;
+use state::chain_state::ChainState;
 use state::error::StateError;
 use transaction::transaction::{SignedTransaction, UnsignedTransaction};
 

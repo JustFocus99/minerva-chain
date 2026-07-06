@@ -1,9 +1,10 @@
 use crate::error::StateError;
+use ::block::block::Block;
 use primitives::{AccountId, Amount, BlockHash};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, io::Chain};
 use transaction::transaction::SignedTransaction;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ChainState {
     accounts: BTreeMap<AccountId, crate::account::Account>,
 }
@@ -103,5 +104,17 @@ impl ChainState {
         receiver_account.balance = receiver_new_balance;
 
         Ok(())
+    }
+
+    pub fn execute_block(
+        parent_state: &ChainState,
+        block: Block,
+    ) -> Result<ChainState, StateError> {
+        let mut temp_state = parent_state.clone();
+
+        for signed_tx in block.transactions {
+            temp_state.apply_signed_transaction(signed_tx)?;
+        }
+        Ok(temp_state)
     }
 }
