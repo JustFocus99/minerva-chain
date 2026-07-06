@@ -16,4 +16,8 @@ pub enum StateError {
     InvalidNonce { expected: u64, actual: u64 },
     #[error("insufficient balance: available {available}, required {required}")]
     InsufficientBalance { available: u64, required: u64 },
+    #[error("invalid transaction root")]
+    InvalidTransactionRoot,
+    #[error("invalid state commitment")]
+    InvalidStateCommitment,
 }

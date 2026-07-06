@@ -1,10 +1,9 @@
-use primitives::{BlockHash, BlockHeight, StateCommitment, ValidatorId};
+use primitives::{BlockHash, BlockHeight, StateCommitment, TransactionRoot, ValidatorId};
 use transaction::transaction::SignedTransaction;
-
 pub struct BlockHeader {
     pub height: BlockHeight,
     pub parent_hash: BlockHash,
-    pub transaction_root: [u8; 32],
+    pub transaction_root: TransactionRoot,
     pub state_commitment: StateCommitment,
     pub producer: ValidatorId,
     pub slot: u64,
@@ -19,7 +18,7 @@ impl BlockHeader {
     pub fn new(
         height: BlockHeight,
         parent_hash: BlockHash,
-        transaction_root: [u8; 32],
+        transaction_root: TransactionRoot,
         state_commitment: StateCommitment,
         producer: ValidatorId,
         slot: u64,
@@ -39,7 +38,7 @@ impl BlockHeader {
         let mut data = Vec::new();
         data.extend_from_slice(&self.height.to_le_bytes());
         data.extend_from_slice(&self.parent_hash);
-        data.extend_from_slice(&self.transaction_root);
+        data.extend_from_slice(self.transaction_root.as_bytes());
         data.extend_from_slice(&self.state_commitment);
         data.extend_from_slice(&self.producer);
         data.extend_from_slice(&self.slot.to_le_bytes());

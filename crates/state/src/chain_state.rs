@@ -1,7 +1,8 @@
 use crate::error::StateError;
 use ::block::block::Block;
+use block::merkle_root;
 use primitives::{AccountId, Amount, BlockHash};
-use std::{collections::BTreeMap, io::Chain};
+use std::collections::BTreeMap;
 use transaction::transaction::SignedTransaction;
 
 #[derive(Default, Clone)]
@@ -110,11 +111,27 @@ impl ChainState {
         parent_state: &ChainState,
         block: Block,
     ) -> Result<ChainState, StateError> {
+        let actual_transaction_root = merkle_root(
+            &block
+                .transactions
+                .iter()
+                .map(|tx| tx.transaction.id())
+                .collect::<Vec<_>>(),
+        );
+        if block.header.transaction_root != actual_transaction_root {
+            return Err(StateError::InvalidTransactionRoot);
+        }
+
         let mut temp_state = parent_state.clone();
 
         for signed_tx in block.transactions {
             temp_state.apply_signed_transaction(signed_tx)?;
         }
+
+        if block.header.state_commitment != temp_state.state_commitment() {
+            return Err(StateError::InvalidStateCommitment);
+        }
+
         Ok(temp_state)
     }
 }
