@@ -1,3 +1,4 @@
+use primitives::TransactionId;
 use transaction::transaction::UnsignedTransaction;
 
 #[test]
@@ -9,6 +10,6 @@ fn transaction_id_is_derived_from_serialized_bytes() {
         nonce: 7,
     };
 
-    let expected = crypto::hash::hash_bytes(&tx.to_bytes());
+    let expected = TransactionId::new(crypto::hash::hash_bytes(&tx.to_bytes()));
     assert_eq!(tx.id(), expected);
 }

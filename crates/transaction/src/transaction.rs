@@ -23,7 +23,7 @@ impl UnsignedTransaction {
     }
 
     pub fn id(&self) -> TransactionId {
-        hash_bytes(&self.to_bytes())
+        TransactionId::new(hash_bytes(&self.to_bytes()))
     }
 
     pub fn is_valid(&self) -> bool {
