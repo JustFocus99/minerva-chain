@@ -1,5 +1,5 @@
-use execution::{chain_state::ChainState, error::ExecutionError};
-use state::account::Account;
+use state::{account::Account, ChainState};
+use state::error::StateError;
 use transaction::transaction::{SignedTransaction, UnsignedTransaction};
 
 fn account(id: [u8; 32], balance: u64) -> Account {
@@ -75,7 +75,7 @@ fn missing_sender_fails() {
     let signed = signed_tx([1u8; 32], [2u8; 32], 25, 0);
 
     let err = state.apply_signed_transaction(signed).unwrap_err();
-    assert!(matches!(err, ExecutionError::SenderMissing));
+    assert!(matches!(err, StateError::SenderMissing));
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn missing_receiver_fails() {
     let signed = signed_tx([1u8; 32], [2u8; 32], 25, 0);
 
     let err = state.apply_signed_transaction(signed).unwrap_err();
-    assert!(matches!(err, ExecutionError::ReceiverMissing));
+    assert!(matches!(err, StateError::ReceiverMissing));
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn invalid_signature_fails() {
     signed.public_key = [9u8; 32];
 
     let err = state.apply_signed_transaction(signed).unwrap_err();
-    assert!(matches!(err, ExecutionError::InvalidSignature));
+    assert!(matches!(err, StateError::InvalidSignature));
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn wrong_nonce_fails() {
     let signed = signed_tx([1u8; 32], [2u8; 32], 25, 7);
 
     let err = state.apply_signed_transaction(signed).unwrap_err();
-    assert!(matches!(err, ExecutionError::InvalidNonce { .. }));
+    assert!(matches!(err, StateError::InvalidNonce { .. }));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn insufficient_balance_fails() {
     let signed = signed_tx([1u8; 32], [2u8; 32], 200, 0);
 
     let err = state.apply_signed_transaction(signed).unwrap_err();
-    assert!(matches!(err, ExecutionError::InsufficientBalance { .. }));
+    assert!(matches!(err, StateError::InsufficientBalance { .. }));
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn zero_amount_fails() {
     let signed = signed_tx([1u8; 32], [2u8; 32], 0, 0);
 
     let err = state.apply_signed_transaction(signed).unwrap_err();
-    assert!(matches!(err, ExecutionError::ZeroAmount));
+    assert!(matches!(err, StateError::ZeroAmount));
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn sender_equals_receiver_fails() {
     let signed = signed_tx([1u8; 32], [1u8; 32], 25, 0);
 
     let err = state.apply_signed_transaction(signed).unwrap_err();
-    assert!(matches!(err, ExecutionError::SenderEqualsReceiver));
+    assert!(matches!(err, StateError::SenderEqualsReceiver));
 }
 
 #[test]
@@ -207,5 +207,5 @@ fn replaying_same_transaction_fails_because_nonce_changed() {
     state.apply_signed_transaction(first).unwrap();
     let err = state.apply_signed_transaction(second).unwrap_err();
 
-    assert!(matches!(err, ExecutionError::InvalidNonce { .. }));
+    assert!(matches!(err, StateError::InvalidNonce { .. }));
 }

@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 primitives = { path = "../primitives" }
+transaction = { path = "../transaction" }
+crypto = { path = "../crypto" }
+thiserror = "1"

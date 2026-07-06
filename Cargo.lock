@@ -140,16 +140,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "execution"
-version = "0.1.0"
-dependencies = [
- "crypto",
- "primitives",
- "state",
- "transaction",
-]
-
-[[package]]
 name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -331,7 +321,10 @@ dependencies = [
 name = "state"
 version = "0.1.0"
 dependencies = [
+ "crypto",
  "primitives",
+ "thiserror",
+ "transaction",
 ]
 
 [[package]]
