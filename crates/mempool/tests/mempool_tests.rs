@@ -214,3 +214,108 @@ fn invalid_signature_does_not_change_pool_size() {
 
     assert_eq!(size_before, size_after);
 }
+
+// --- Hour 7: adversarial tests ---
+//
+// rejects_duplicate_transaction (Hour 3), rejects_invalid_signature_before_pool_insert
+// (Hour 4), and rejects_stale_nonce / does_not_execute_nonce_gap (Hour 5) above already
+// cover the "duplicate", "invalid signature", "stale nonce", and "nonce gap" adversarial
+// cases end to end (rejection/pending + unchanged pool size + tx ID not stored where
+// applicable). `rejects_stale_nonce` can't be redefined here since Rust doesn't allow a
+// second fn with that name in one file; it's already satisfied above. The tests below add
+// the two cases not yet covered: fee overflow and structurally malformed transactions.
+
+#[test]
+fn rejects_duplicate_transactions() {
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]);
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    pool.submit_transaction(resign(&tx), &state);
+
+    let before_size = pool.len();
+    let result = pool.submit_transaction(resign(&tx), &state);
+    let after_size = pool.len();
+
+    // Duplicate is its own PoolAdmission variant, not Rejected(_) -- the pool
+    // still recognizes the resubmission without treating it as invalid input.
+    assert_eq!(result, PoolAdmission::Duplicate);
+    assert_eq!(before_size, after_size);
+}
+
+#[test]
+fn rejects_invalid_signatures() {
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]);
+    let mut tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    tx.signature[0] ^= 0xff;
+    let tx_id = tx.transaction.id();
+
+    let before_size = pool.len();
+    let result = pool.submit_transaction(tx, &state);
+    let after_size = pool.len();
+
+    assert_eq!(before_size, after_size);
+    assert!(matches!(
+        result,
+        PoolAdmission::Rejected(TransactionPoolError::InvalidSignature)
+    ));
+    assert!(!pool.contains_transaction_id(&tx_id));
+}
+
+#[test]
+fn rejects_nonce_gap_from_ready_set() {
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]); // Alice's current nonce = 0
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 2);
+
+    let result = pool.submit_transaction(tx, &state);
+
+    // Pending, not rejected: it's stored for later, just not eligible yet.
+    assert_eq!(result, PoolAdmission::QueuedForFutureNonce);
+    assert_eq!(pool.len(), 1);
+    assert!(pool.ready_transactions(&state).is_empty());
+}
+
+#[test]
+fn rejects_fee_overflow() {
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]);
+    let tx = signed_tx([1u8; 32], [2u8; 32], u64::MAX, 0);
+    let tx_id = tx.transaction.id();
+
+    let before_size = pool.len();
+    let result = pool.submit_transaction(tx, &state);
+    let after_size = pool.len();
+
+    assert_eq!(before_size, after_size);
+    assert!(matches!(
+        result,
+        PoolAdmission::Rejected(TransactionPoolError::FeeOverflow)
+    ));
+    assert!(!pool.contains_transaction_id(&tx_id));
+}
+
+#[test]
+fn rejects_transaction_with_malformed_bytes() {
+    // minerva-chain builds transactions directly rather than decoding them
+    // from a wire format, so there's no separate decoder to exercise here.
+    // This drives the equivalent structural check submit_transaction runs
+    // before admission -- UnsignedTransaction::is_valid() -- with a
+    // zero-amount transaction, which is structurally invalid regardless of
+    // signature or balance.
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]);
+    let tx = signed_tx([1u8; 32], [2u8; 32], 0, 0);
+    let tx_id = tx.transaction.id();
+
+    let before_size = pool.len();
+    let result = pool.submit_transaction(tx, &state);
+    let after_size = pool.len();
+
+    assert_eq!(before_size, after_size);
+    assert!(matches!(
+        result,
+        PoolAdmission::Rejected(TransactionPoolError::MalformedTransaction)
+    ));
+    assert!(!pool.contains_transaction_id(&tx_id));
+}
