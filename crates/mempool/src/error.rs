@@ -6,5 +6,7 @@ pub enum TransactionPoolError {
     StaleNonce,
     DuplicateNonceForSender,
     FeeOverflow,
+    InsufficientFeeBalance,
+    FeeCollectorMissing,
     MalformedTransaction,
 }

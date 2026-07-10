@@ -1,6 +1,6 @@
 use crate::error::TransactionPoolError;
 use primitives::amount::checked_add_amount;
-use primitives::{AccountId, Nonce, TransactionId};
+use primitives::{AccountId, BASE_FEE, Nonce, TransactionId};
 use state::chain_state::ChainState;
 use std::collections::{BTreeMap, BTreeSet};
 use transaction::transaction::SignedTransaction;
@@ -49,8 +49,8 @@ impl TransactionPool {
             return PoolAdmission::Rejected(TransactionPoolError::InvalidSignature);
         }
 
-        let sender_nonce = match current_state.get_account(&tx.transaction.from) {
-            Some(sender) => sender.nonce,
+        let (sender_nonce, sender_balance) = match current_state.get_account(&tx.transaction.from) {
+            Some(sender) => (sender.nonce, sender.balance),
             None => return PoolAdmission::Rejected(TransactionPoolError::SenderMissing),
         };
 
@@ -66,11 +66,15 @@ impl TransactionPool {
             return PoolAdmission::Rejected(TransactionPoolError::DuplicateNonceForSender);
         }
 
-        // No fee field/model exists yet (transactions carry only amount, not a
-        // separate fee). This only guards the amount arithmetic itself against
-        // overflow as a stand-in until a real fee is added to UnsignedTransaction.
-        if checked_add_amount(tx.transaction.amount, 0).is_err() {
+        // Mirrors state::ChainState::apply_signed_transaction: total_debit is the
+        // amount plus the fixed base fee (see docs/fee-model.md). Rejecting here
+        // means an unpayable transaction never gets to wait in the pool.
+        let Ok(total_debit) = checked_add_amount(tx.transaction.amount, BASE_FEE) else {
             return PoolAdmission::Rejected(TransactionPoolError::FeeOverflow);
+        };
+
+        if sender_balance < total_debit {
+            return PoolAdmission::Rejected(TransactionPoolError::InsufficientFeeBalance);
         }
 
         let tx_nonce = tx.transaction.nonce;

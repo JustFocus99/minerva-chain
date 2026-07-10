@@ -1,19 +1,24 @@
 use crate::error::StateError;
 use ::block::block::Block;
 use block::merkle_root;
-use primitives::{AccountId, Amount, BlockHash};
+use primitives::{
+    AccountId, Amount, BASE_FEE, BlockHash,
+    amount::{checked_add_amount, checked_sub_amount},
+};
 use std::collections::BTreeMap;
 use transaction::transaction::SignedTransaction;
 
 #[derive(Default, Clone)]
 pub struct ChainState {
     accounts: BTreeMap<AccountId, crate::account::Account>,
+    fee_collector: Option<AccountId>,
 }
 
 impl ChainState {
     pub fn new() -> Self {
         Self {
             accounts: BTreeMap::new(),
+            fee_collector: None,
         }
     }
 
@@ -30,6 +35,20 @@ impl ChainState {
         account_id: &AccountId,
     ) -> Option<&mut crate::account::Account> {
         self.accounts.get_mut(account_id)
+    }
+
+    /// Designates the special account that collects transaction fees.
+    /// See docs/fee-model.md.
+    pub fn set_fee_collector(&mut self, account_id: AccountId) {
+        self.fee_collector = Some(account_id);
+    }
+
+    pub fn fee_collector(&self) -> Option<AccountId> {
+        self.fee_collector
+    }
+
+    pub fn fee_collector_account(&self) -> Option<&crate::account::Account> {
+        self.fee_collector.and_then(|id| self.accounts.get(&id))
     }
 
     pub fn total_supply(&self) -> Amount {
@@ -72,13 +91,16 @@ impl ChainState {
             return Err(StateError::SenderEqualsReceiver);
         }
 
-        let Some(sender_balance) = self.accounts.get(&tx.from).map(|account| account.balance)
-        else {
+        let Some(sender_account) = self.get_account(&tx.from) else {
             return Err(StateError::SenderMissing);
         };
-        let Some(sender_nonce) = self.accounts.get(&tx.from).map(|account| account.nonce) else {
-            return Err(StateError::SenderMissing);
+        let sender_balance = sender_account.balance;
+        let sender_nonce = sender_account.nonce;
+
+        let Some(receiver_account) = self.get_account(&tx.to) else {
+            return Err(StateError::ReceiverMissing);
         };
+        let receiver_balance = receiver_account.balance;
 
         if sender_nonce != tx.nonce {
             return Err(StateError::InvalidNonce {
@@ -87,22 +109,36 @@ impl ChainState {
             });
         }
 
-        if sender_balance < tx.amount {
+        let total_debit = checked_add_amount(tx.amount, BASE_FEE)?;
+
+        if sender_balance < total_debit {
             return Err(StateError::InsufficientBalance {
                 available: sender_balance,
-                required: tx.amount,
+                required: total_debit,
             });
         }
 
-        let sender_new_balance = sender_balance - tx.amount;
-        let receiver_new_balance = self.accounts.get(&tx.to).unwrap().balance + tx.amount;
+        // verify fee collector exists
+        let fee_collector_id = self.fee_collector.ok_or(StateError::FeeCollectorMissing)?;
+        let fee_collector_balance = self
+            .get_account(&fee_collector_id)
+            .ok_or(StateError::FeeCollectorMissing)?
+            .balance;
 
-        let sender_account = self.accounts.get_mut(&tx.from).unwrap();
+        let sender_new_balance = checked_sub_amount(sender_balance, total_debit)?;
+        let receiver_new_balance = checked_add_amount(receiver_balance, tx.amount)?;
+        let fee_collector_new_balance = checked_add_amount(fee_collector_balance, BASE_FEE)
+            .map_err(|_| StateError::FeeOverflow)?;
+
+        let sender_account = self.get_account_mut(&tx.from).unwrap();
         sender_account.balance = sender_new_balance;
         sender_account.increment_nonce();
 
-        let receiver_account = self.accounts.get_mut(&tx.to).unwrap();
+        let receiver_account = self.get_account_mut(&tx.to).unwrap();
         receiver_account.balance = receiver_new_balance;
+
+        let fee_collector_account = self.get_account_mut(&fee_collector_id).unwrap();
+        fee_collector_account.balance = fee_collector_new_balance;
 
         Ok(())
     }

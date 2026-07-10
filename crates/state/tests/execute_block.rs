@@ -28,11 +28,15 @@ fn resign(tx: &SignedTransaction) -> SignedTransaction {
     })
 }
 
+const FEE_COLLECTOR: [u8; 32] = [7u8; 32];
+
 fn setup_parent_state() -> ChainState {
     let mut state = ChainState::new();
     state.create_account(account([1u8; 32], 100));
     state.create_account(account([2u8; 32], 50));
     state.create_account(account([3u8; 32], 0));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
     state
 }
 
@@ -79,7 +83,7 @@ fn valid_block_executes_all_transactions() {
 
     let result = ChainState::execute_block(&parent, block).unwrap();
 
-    assert_eq!(result.get_account(&[1u8; 32]).unwrap().balance, 75);
+    assert_eq!(result.get_account(&[1u8; 32]).unwrap().balance, 73);
     assert_eq!(result.get_account(&[1u8; 32]).unwrap().nonce, 2);
     assert_eq!(result.get_account(&[2u8; 32]).unwrap().balance, 60);
     assert_eq!(result.get_account(&[3u8; 32]).unwrap().balance, 15);

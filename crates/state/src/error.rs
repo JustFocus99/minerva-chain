@@ -1,3 +1,4 @@
+use primitives::error::PrimitiveError;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -20,4 +21,18 @@ pub enum StateError {
     InvalidTransactionRoot,
     #[error("invalid state commitment")]
     InvalidStateCommitment,
+    #[error("fee overflow")]
+    FeeOverflow,
+    #[error("insufficient fee balance")]
+    InsufficientFeeBalance,
+    #[error("fee collector missing")]
+    FeeCollectorMissing,
+    #[error("amount arithmetic error: {0:?}")]
+    Amount(PrimitiveError),
+}
+
+impl From<PrimitiveError> for StateError {
+    fn from(error: PrimitiveError) -> Self {
+        StateError::Amount(error)
+    }
 }

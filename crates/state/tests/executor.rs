@@ -3,6 +3,8 @@ use state::chain_state::ChainState;
 use state::error::StateError;
 use transaction::transaction::{SignedTransaction, UnsignedTransaction};
 
+const FEE_COLLECTOR: [u8; 32] = [7u8; 32];
+
 fn account(id: [u8; 32], balance: u64) -> Account {
     Account::new(id, balance)
 }
@@ -21,12 +23,14 @@ fn valid_transfer_debits_sender() {
     let mut state = ChainState::new();
     state.create_account(account([1u8; 32], 100));
     state.create_account(account([2u8; 32], 50));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
 
     let signed = signed_tx([1u8; 32], [2u8; 32], 25, 0);
 
     state.apply_signed_transaction(signed).unwrap();
 
-    assert_eq!(state.get_account(&[1u8; 32]).unwrap().balance, 75);
+    assert_eq!(state.get_account(&[1u8; 32]).unwrap().balance, 74);
 }
 
 #[test]
@@ -34,6 +38,8 @@ fn valid_transfer_credits_receiver() {
     let mut state = ChainState::new();
     state.create_account(account([1u8; 32], 100));
     state.create_account(account([2u8; 32], 50));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
 
     let signed = signed_tx([1u8; 32], [2u8; 32], 25, 0);
 
@@ -47,6 +53,8 @@ fn valid_transfer_increments_sender_nonce() {
     let mut state = ChainState::new();
     state.create_account(account([1u8; 32], 100));
     state.create_account(account([2u8; 32], 50));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
 
     let signed = signed_tx([1u8; 32], [2u8; 32], 25, 0);
 
@@ -60,6 +68,8 @@ fn total_supply_unchanged_after_valid_transfer() {
     let mut state = ChainState::new();
     state.create_account(account([1u8; 32], 100));
     state.create_account(account([2u8; 32], 50));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
 
     let signed = signed_tx([1u8; 32], [2u8; 32], 25, 0);
 
@@ -201,6 +211,8 @@ fn replaying_same_transaction_fails_because_nonce_changed() {
     let mut state = ChainState::new();
     state.create_account(account([1u8; 32], 100));
     state.create_account(account([2u8; 32], 50));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
 
     let first = signed_tx([1u8; 32], [2u8; 32], 25, 0);
     let second = signed_tx([1u8; 32], [2u8; 32], 25, 0);
@@ -209,4 +221,73 @@ fn replaying_same_transaction_fails_because_nonce_changed() {
     let err = state.apply_signed_transaction(second).unwrap_err();
 
     assert!(matches!(err, StateError::InvalidNonce { .. }));
+}
+
+#[test]
+fn successful_transaction_charges_fee() {
+    let mut state = ChainState::new();
+    state.create_account(account([1u8; 32], 100));
+    state.create_account(account([2u8; 32], 0));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
+
+    let signed = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+
+    state.apply_signed_transaction(signed).unwrap();
+
+    assert_eq!(state.get_account(&[1u8; 32]).unwrap().balance, 89);
+    assert_eq!(state.get_account(&[2u8; 32]).unwrap().balance, 10);
+    assert_eq!(state.get_account(&FEE_COLLECTOR).unwrap().balance, 1);
+}
+
+#[test]
+fn insufficient_fee_balance_rejects_transaction() {
+    let mut state = ChainState::new();
+    state.create_account(account([1u8; 32], 10));
+    state.create_account(account([2u8; 32], 0));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
+
+    // Alice has exactly enough for the transfer amount, but not amount + fee.
+    let signed = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+
+    let err = state.apply_signed_transaction(signed).unwrap_err();
+
+    assert!(matches!(err, StateError::InsufficientBalance { .. }));
+    assert_eq!(state.get_account(&[1u8; 32]).unwrap().balance, 10);
+    assert_eq!(state.get_account(&[2u8; 32]).unwrap().balance, 0);
+    assert_eq!(state.get_account(&FEE_COLLECTOR).unwrap().balance, 0);
+}
+
+#[test]
+fn fee_overflow_rejects_transaction() {
+    let mut state = ChainState::new();
+    state.create_account(account([1u8; 32], u64::MAX));
+    state.create_account(account([2u8; 32], 0));
+    state.create_account(account(FEE_COLLECTOR, 0));
+    state.set_fee_collector(FEE_COLLECTOR);
+
+    let signed = signed_tx([1u8; 32], [2u8; 32], u64::MAX, 0);
+
+    let err = state.apply_signed_transaction(signed).unwrap_err();
+
+    assert!(matches!(err, StateError::Amount(_)));
+    assert_eq!(state.get_account(&[1u8; 32]).unwrap().balance, u64::MAX);
+    assert_eq!(state.get_account(&[2u8; 32]).unwrap().balance, 0);
+    assert_eq!(state.get_account(&FEE_COLLECTOR).unwrap().balance, 0);
+}
+
+#[test]
+fn missing_fee_collector_rejects_transaction() {
+    let mut state = ChainState::new();
+    state.create_account(account([1u8; 32], 100));
+    state.create_account(account([2u8; 32], 0));
+
+    let signed = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+
+    let err = state.apply_signed_transaction(signed).unwrap_err();
+
+    assert!(matches!(err, StateError::FeeCollectorMissing));
+    assert_eq!(state.get_account(&[1u8; 32]).unwrap().balance, 100);
+    assert_eq!(state.get_account(&[2u8; 32]).unwrap().balance, 0);
 }

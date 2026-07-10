@@ -96,6 +96,23 @@ fn rejects_duplicate_nonce_for_sender() {
 }
 
 #[test]
+fn rejects_insufficient_fee_balance() {
+    let mut pool = TransactionPool::new();
+    let mut state = ChainState::new();
+    state.create_account(Account::new([1u8; 32], 10));
+    // Enough for the transfer amount, not enough for amount + BASE_FEE.
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+
+    let result = pool.submit_transaction(tx, &state);
+
+    assert_eq!(
+        result,
+        PoolAdmission::Rejected(TransactionPoolError::InsufficientFeeBalance)
+    );
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
 fn accepts_expected_nonce() {
     let mut pool = TransactionPool::new();
     let state = state_with_account([1u8; 32]);

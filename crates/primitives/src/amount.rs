@@ -3,6 +3,10 @@ use crate::error::PrimitiveError;
 /// A numeric value for transfers and balances.
 pub type Amount = u64;
 
+/// The fixed base fee charged for every transaction included in a block.
+/// See docs/fee-model.md.
+pub const BASE_FEE: Amount = 1;
+
 /// Create a non-zero amount.
 pub fn amount_from_u64(value: u64) -> Result<Amount, PrimitiveError> {
     if value == 0 {

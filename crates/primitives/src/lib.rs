@@ -3,7 +3,7 @@ pub mod error;
 pub mod hash;
 pub mod ids;
 
-pub use amount::Amount;
+pub use amount::{Amount, BASE_FEE};
 pub use hash::*;
 pub use ids::{AccountId, ValidatorId};
 
