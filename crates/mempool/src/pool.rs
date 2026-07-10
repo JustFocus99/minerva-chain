@@ -1,5 +1,6 @@
 use crate::error::TransactionPoolError;
 use primitives::TransactionId;
+use primitives::amount::checked_add_amount;
 use state::chain_state::ChainState;
 use std::collections::BTreeSet;
 use transaction::transaction::SignedTransaction;
@@ -33,11 +34,30 @@ impl TransactionPool {
     pub fn submit_transaction(
         &mut self,
         tx: SignedTransaction,
-        _current_state: &ChainState,
+        current_state: &ChainState,
     ) -> PoolAdmission {
         let tx_id = tx.transaction.id();
         if self.contains_transaction_id(&tx_id) {
             return PoolAdmission::Duplicate;
+        }
+
+        if !tx.transaction.is_valid() {
+            return PoolAdmission::Rejected(TransactionPoolError::MalformedTransaction);
+        }
+
+        if !tx.verify() {
+            return PoolAdmission::Rejected(TransactionPoolError::InvalidSignature);
+        }
+
+        if current_state.get_account(&tx.transaction.from).is_none() {
+            return PoolAdmission::Rejected(TransactionPoolError::SenderMissing);
+        }
+
+        // No fee field/model exists yet (transactions carry only amount, not a
+        // separate fee). This only guards the amount arithmetic itself against
+        // overflow as a stand-in until a real fee is added to UnsignedTransaction.
+        if checked_add_amount(tx.transaction.amount, 0).is_err() {
+            return PoolAdmission::Rejected(TransactionPoolError::FeeOverflow);
         }
 
         self.transactions.push(tx);
