@@ -45,9 +45,11 @@ fn rejects_duplicate_transaction() {
 #[test]
 fn allows_different_transaction_ids() {
     let mut pool = TransactionPool::new();
-    let state = state_with_account([1u8; 32]);
-    let tx_a = signed_tx([1u8; 32], [2u8; 32], 10, 0);
-    let tx_b = signed_tx([1u8; 32], [3u8; 32], 15, 1);
+    let mut state = ChainState::new();
+    state.create_account(Account::new([1u8; 32], 100));
+    state.create_account(Account::new([2u8; 32], 100));
+    let tx_a = signed_tx([1u8; 32], [3u8; 32], 10, 0);
+    let tx_b = signed_tx([2u8; 32], [3u8; 32], 15, 0);
 
     let result_a = pool.submit_transaction(tx_a, &state);
     let result_b = pool.submit_transaction(tx_b, &state);
@@ -73,6 +75,111 @@ fn rejects_invalid_signature_before_pool_insert() {
     );
     assert_eq!(pool.len(), 0);
     assert!(!pool.contains_transaction_id(&tx_id));
+}
+
+#[test]
+fn rejects_duplicate_nonce_for_sender() {
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]);
+    let tx_a = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    let tx_b = signed_tx([1u8; 32], [3u8; 32], 20, 0);
+
+    let result_a = pool.submit_transaction(tx_a, &state);
+    let result_b = pool.submit_transaction(tx_b, &state);
+
+    assert_eq!(result_a, PoolAdmission::Accepted);
+    assert_eq!(
+        result_b,
+        PoolAdmission::Rejected(TransactionPoolError::DuplicateNonceForSender)
+    );
+    assert_eq!(pool.len(), 1);
+}
+
+#[test]
+fn accepts_expected_nonce() {
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]);
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+
+    let result = pool.submit_transaction(tx, &state);
+
+    assert_eq!(result, PoolAdmission::Accepted);
+}
+
+#[test]
+fn queues_future_nonce() {
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]);
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 1);
+
+    let result = pool.submit_transaction(tx, &state);
+
+    assert_eq!(result, PoolAdmission::QueuedForFutureNonce);
+    assert_eq!(pool.len(), 1);
+    assert!(pool.ready_transactions(&state).is_empty());
+}
+
+#[test]
+fn rejects_stale_nonce() {
+    let mut pool = TransactionPool::new();
+    let mut state = ChainState::new();
+    state.create_account({
+        let mut account = Account::new([1u8; 32], 100);
+        account.increment_nonce();
+        account.increment_nonce();
+        account
+    });
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 1);
+
+    let size_before = pool.len();
+    let result = pool.submit_transaction(tx, &state);
+    let size_after = pool.len();
+
+    assert_eq!(
+        result,
+        PoolAdmission::Rejected(TransactionPoolError::StaleNonce)
+    );
+    assert_eq!(size_before, size_after);
+}
+
+#[test]
+fn does_not_execute_nonce_gap() {
+    let mut pool = TransactionPool::new();
+    let state = state_with_account([1u8; 32]);
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 2);
+
+    pool.submit_transaction(tx, &state);
+
+    assert!(pool.ready_transactions(&state).is_empty());
+}
+
+#[test]
+fn orders_transactions_by_sender_and_nonce_deterministically() {
+    let mut pool = TransactionPool::new();
+    let mut state = ChainState::new();
+    state.create_account(Account::new([2u8; 32], 100));
+    state.create_account(Account::new([5u8; 32], 100));
+
+    pool.submit_transaction(signed_tx([5u8; 32], [1u8; 32], 10, 1), &state);
+    pool.submit_transaction(signed_tx([2u8; 32], [1u8; 32], 10, 2), &state);
+    pool.submit_transaction(signed_tx([5u8; 32], [1u8; 32], 10, 0), &state);
+    pool.submit_transaction(signed_tx([2u8; 32], [1u8; 32], 10, 0), &state);
+
+    let ordered = pool.ordered_transactions();
+    let keys: Vec<([u8; 32], u64)> = ordered
+        .iter()
+        .map(|tx| (tx.transaction.from, tx.transaction.nonce))
+        .collect();
+
+    assert_eq!(
+        keys,
+        vec![
+            ([2u8; 32], 0),
+            ([2u8; 32], 2),
+            ([5u8; 32], 0),
+            ([5u8; 32], 1),
+        ]
+    );
 }
 
 #[test]

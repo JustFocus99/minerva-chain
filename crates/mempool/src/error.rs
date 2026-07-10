@@ -4,6 +4,7 @@ pub enum TransactionPoolError {
     InvalidSignature,
     SenderMissing,
     StaleNonce,
+    DuplicateNonceForSender,
     FeeOverflow,
     MalformedTransaction,
 }
