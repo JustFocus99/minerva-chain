@@ -43,6 +43,24 @@ Run the test suite from the repository root with:
 cargo test
 ```
 
+## Current Week 3 status
+
+Week 3 work is in progress on the mempool and fee model. So far:
+
+- Implemented a nonce-aware transaction pool.
+- Added duplicate transaction rejection.
+- Added invalid signature rejection.
+- Added future nonce queueing.
+- Added stale nonce rejection.
+- Added deterministic transaction ordering.
+
+This is a snapshot of in-progress work, not a finished system. There is no
+networking, no block producer that actually pulls from the pool, no pool
+size limits or eviction, and no guarantee that a transaction accepted into
+the pool is still valid by the time it would be included in a block. See
+`notes/w3d1-mempool.md` and `docs/fee-model.md` for the detailed design and
+implementation notes.
+
 ## Limitations
 
 This is a prototype. It is not intended to be secure, performant, or complete enough for production use.
