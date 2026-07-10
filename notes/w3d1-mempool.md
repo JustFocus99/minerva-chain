@@ -1,44 +1,147 @@
 # Day 01 — Transaction pool, nonce ordering, and fee design
 
-## Current Week 2 status
+## What is a mempool?
 
-Week 2 implemented deterministic single-block execution on top of an in-memory `ChainState`. The pieces that exist today, read directly from `crates/transaction`, `crates/state`, and `crates/block`:
+A mempool is a node's temporary waiting area for transactions that are valid enough to be considered, but not yet included in a block.
 
-- `UnsignedTransaction { from, to, amount, nonce }` with a `to_bytes()` encoding and an `id()` derived by hashing that encoding (`crates/transaction/src/transaction.rs`).
-- `SignedTransaction { transaction, public_key, signature }` with `sign()` and `verify()`.
-- `ChainState` backed by `BTreeMap<AccountId, Account>` (`crates/state/src/chain_state.rs`), so account iteration and `state_commitment()` are already deterministic.
-- `apply_signed_transaction` — verifies signature, checks sender/receiver exist, rejects zero amount and self-transfer, requires `tx.nonce == sender.nonce` exactly, checks balance, then mutates a cloned state.
-- `execute_block` — recomputes the Merkle root over transaction IDs and rejects the block if it does not match `header.transaction_root`; executes transactions in the block's given order against a clone of the parent state; rejects the block if the resulting `state_commitment()` does not match `header.state_commitment`.
-- `Block` / `BlockHeader` with `height`, `parent_hash`, `transaction_root`, `state_commitment`, `producer`, `slot`, and a `compute_hash()`.
+```text
+User creates transaction
+        ↓
+Node receives transaction
+        ↓
+Node checks basic validity
+        ↓
+If valid, transaction enters mempool
+        ↓
+Block producer selects transactions from mempool
+        ↓
+Transactions are executed inside a block
+        ↓
+Block becomes part of the chain
+        ↓
+Included transactions are removed from mempool
+```
 
-## What works
+For minerva-chain, the mempool is not shared across a network — it is only local memory inside a single node.
 
-- Deterministic state commitment: because `ChainState` already uses `BTreeMap`, `state_commitment()` and `total_supply()` do not depend on hash iteration order.
-- Atomic execution: both `apply_signed_transaction` and `execute_block` operate on a cloned state and only return the new state on success, so a rejected transaction or block never leaves partial mutations visible (per the Week 2 day-04 note).
-- Merkle root and state commitment are both checked as part of block execution, so a block that lies about its contents or its resulting state is rejected before it can be adopted.
-- Balance and nonce arithmetic for accounts goes through `checked_add_amount` / `checked_sub_amount` in `primitives::amount`, which return `PrimitiveError` instead of panicking on overflow/underflow (`Account::deposit` / `Account::withdraw` use this; the transfer path in `apply_signed_transaction` uses raw `-`/`+` on already-checked balances since the balance check happens first).
+Core definition:
 
-## What is missing
+```text
+A mempool is a temporary transaction pool.
 
-- **No mempool crate.** There is no admission layer at all yet — `execute_block` is handed a `Vec<SignedTransaction>` directly with no notion of a pending pool, no duplicate-ID check across the pool, and no nonce-gap handling. `execute_block` also does not itself reject duplicate transaction IDs within a single block; two transactions with the same ID would simply be applied twice if they both passed per-transaction checks.
-- **No fee field.** `UnsignedTransaction` has no `fee`. Week 3 fee accounting needs a design decision on whether fee is a separate field or derived, and how it interacts with `checked_sub_amount`.
-- **Nonce checking is strict-equality, not gap-aware.** `apply_signed_transaction` requires `tx.nonce == sender.nonce`. That is correct for *execution*, but a mempool needs to hold future-nonce transactions rather than reject them outright — this is a new concept, not something Week 2 provides.
-- **Signature scheme is a placeholder.** `crypto::signature::sign_message` / `verify_signature` (`crates/crypto/src/signature.rs`) use a fixed `DEFAULT_PUBLIC_KEY` and a deterministic hash-based "signature" — `verify()` only proves the message matches a fixed keypair, not that `public_key` corresponds to `tx.from`. Any mempool admission rule that assumes "valid signature implies authorized by `from`" is currently unsound; this is worth flagging rather than fixing today since Week 3's mandate is pool/storage/replay, not cryptography.
-- **No CLI, storage, replay, or fork choice** — none of that exists yet; today's scope is pool design only.
+It stores transactions that have been submitted to the node but have not yet been included in a block.
 
-## What must not change in Week 3
+The mempool does not finalize transactions.
+The mempool does not change account balances.
+The mempool does not decide the canonical chain.
 
-- `ChainState` must remain keyed by `BTreeMap`, not `HashMap`. Any new pool or index structure follows the same rule (see design decision below).
-- `execute_block`'s check order — verify `transaction_root`, execute transactions against a cloned state, verify `state_commitment` — must not be reordered or weakened. The mempool is a pre-filter; it does not replace block-level validation.
-- Atomicity of `apply_signed_transaction` / `execute_block`: a rejected transaction or block must leave the input state untouched. The mempool must not bypass this by mutating `ChainState` directly.
-- A replayed block must still reproduce the exact same `state_commitment`. Nothing added to the mempool layer may introduce non-determinism (wall-clock time, random tie-breaking, `HashMap` iteration) that could change which transactions end up in a block or in what order.
+It only decides whether a transaction is allowed to wait for future block production.
+```
 
-## What invariants must remain true
+Mental model:
 
-- Signature verification happens before any state mutation.
-- Invalid transactions never mutate `ChainState` (enforced today by clone-then-commit in `apply_signed_transaction`).
-- A block's `transaction_root` must match the Merkle root of its actual transactions, and its `state_commitment` must match the state produced by executing it.
-- Total supply is conserved across a valid transfer (`sender_new_balance + receiver_new_balance` unchanged in aggregate) — this will need revisiting once fees are introduced, since a fee changes where value goes rather than whether it's conserved.
+```text
+State execution changes balances.
+Block import changes the chain.
+Mempool only stores waiting transactions.
+```
+
+So if Alice sends Bob 10 coins and the transaction enters the mempool, Bob does not receive the money yet. Bob receives the money only after the transaction is included in a valid block and that block is imported.
+
+### Mempool responsibilities
+
+- reject invalid signatures
+- reject duplicate transaction IDs
+- reject stale nonces
+- hold future-nonce transactions
+- expose ready transactions in deterministic order
+- remove transactions after they are included in a block
+
+### Mempool non-responsibilities
+
+- it does not finalize transactions
+- it does not change balances
+- it does not choose the canonical chain
+- it does not replace block validation
+- it does not trust its own previous checks during block import
+
+The mempool performs **admission checks**. The block executor performs **state transition**. It should not accept garbage, but it should also not fully execute transactions like a block.
+
+Immediate-rejection cases: invalid signature, duplicate transaction ID, malformed transaction bytes, stale nonce, fee overflow, sender account does not exist, transaction too large (if a size limit is defined).
+
+## Nonce behavior
+
+Nonce means: the expected transaction number for an account.
+
+```text
+Current account nonce = N
+
+Transaction nonce == N → ready
+Transaction nonce > N  → pending/future
+Transaction nonce < N  → stale/reject
+```
+
+Example — Alice current nonce = 2:
+
+```text
+tx nonce 2 → can be included next
+tx nonce 3 → wait until nonce 2 executes
+tx nonce 5 → wait, but there is a gap
+tx nonce 1 → reject as stale
+```
+
+This is why the mempool needs ordering — it cannot randomly choose Alice's nonce 5 transaction before Alice's nonce 2 transaction.
+
+### Ready vs pending
+
+```text
+Ready transaction:
+A transaction that can be included in the next block.
+
+Pending transaction:
+A transaction that might become valid later, usually because its nonce is too high.
+```
+
+Example — Alice current nonce = 0:
+
+```text
+Alice tx nonce 0 → ready
+Alice tx nonce 1 → pending
+Alice tx nonce 2 → pending
+```
+
+After nonce 0 executes in a block:
+
+```text
+Alice current nonce = 1
+Alice tx nonce 1 becomes ready
+Alice tx nonce 2 stays pending
+```
+
+Rule summary:
+
+- **Ready**: nonce equals the sender account's current nonce.
+- **Pending**: nonce is greater than the sender account's current nonce.
+- **Rejected**: nonce is lower than the sender account's current nonce, signature is invalid, or transaction ID already exists in the pool.
+
+## Simple Week 3 API plan
+
+```text
+submit_transaction()
+remove_included_transactions()
+ready_transactions()
+pending_transactions()
+pool_size()
+contains_transaction_id()
+```
+
+Suggested internal design:
+
+```rust
+BTreeMap<AccountId, BTreeMap<Nonce, SignedTransaction>>
+```
+
+`BTreeMap` gives deterministic ordering — two nodes with the same mempool contents must produce the same transaction order. Ordering rule: sort by sender `AccountId`, then by nonce, then by transaction ID if needed. This matches the deterministic-ordering design decision below and the existing `ChainState` convention (`BTreeMap<AccountId, Account>`).
 
 ## Week 3 new invariants
 
