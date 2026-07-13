@@ -1,5 +1,5 @@
 use block::block::{Block, BlockHeader};
-use block::merkle_root;
+use block::{GENESIS_PARENT_HASH, merkle_root};
 use primitives::TransactionRoot;
 use state::account::Account;
 use state::chain_state::ChainState;
@@ -49,6 +49,10 @@ fn transaction_root(transactions: &[SignedTransaction]) -> TransactionRoot {
     )
 }
 
+/// Builds a block against a parent state that has no history yet (a fresh
+/// `setup_parent_state()`), so it must satisfy the genesis convention:
+/// height 0, parent_hash == GENESIS_PARENT_HASH. See
+/// `docs/block-validation.md`.
 fn build_valid_block(parent_state: &ChainState, transactions: Vec<SignedTransaction>) -> Block {
     let transaction_root = transaction_root(&transactions);
 
@@ -61,8 +65,8 @@ fn build_valid_block(parent_state: &ChainState, transactions: Vec<SignedTransact
 
     Block {
         header: BlockHeader::new(
-            1,
-            parent_state.state_commitment(),
+            0,
+            GENESIS_PARENT_HASH,
             transaction_root,
             expected_state.state_commitment(),
             [4u8; 32],
@@ -70,6 +74,32 @@ fn build_valid_block(parent_state: &ChainState, transactions: Vec<SignedTransact
         ),
         transactions,
     }
+}
+
+/// Rebuilds a header with one field swapped, recomputing `block_hash` so the
+/// header stays internally self-consistent. Lets a test corrupt exactly the
+/// field it's targeting without also (accidentally) tripping the separate
+/// `InvalidBlockHash` check first.
+fn with_transaction_root(header: &BlockHeader, transaction_root: TransactionRoot) -> BlockHeader {
+    BlockHeader::new(
+        header.height,
+        header.parent_hash,
+        transaction_root,
+        header.state_commitment,
+        header.producer,
+        header.slot,
+    )
+}
+
+fn with_state_commitment(header: &BlockHeader, state_commitment: [u8; 32]) -> BlockHeader {
+    BlockHeader::new(
+        header.height,
+        header.parent_hash,
+        header.transaction_root,
+        state_commitment,
+        header.producer,
+        header.slot,
+    )
 }
 
 #[test]
@@ -145,8 +175,8 @@ fn block_with_invalid_signature_fails() {
 
     let block = Block {
         header: BlockHeader::new(
-            1,
-            parent.state_commitment(),
+            0,
+            GENESIS_PARENT_HASH,
             root,
             parent.state_commitment(),
             [4u8; 32],
@@ -176,8 +206,8 @@ fn invalid_block_does_not_mutate_parent_state() {
     bad_tx.public_key = [9u8; 32];
     let block = Block {
         header: BlockHeader::new(
-            1,
-            parent.state_commitment(),
+            0,
+            GENESIS_PARENT_HASH,
             merkle_root(&[bad_tx.transaction.id()]),
             parent.state_commitment(),
             [4u8; 32],
@@ -206,7 +236,7 @@ fn invalid_block_does_not_mutate_parent_state() {
 fn block_with_bad_transaction_root_fails() {
     let parent = setup_parent_state();
     let mut block = build_valid_block(&parent, vec![signed_tx([1u8; 32], [2u8; 32], 10, 0)]);
-    block.header.transaction_root = merkle_root(&[]);
+    block.header = with_transaction_root(&block.header, merkle_root(&[]));
 
     let err = match ChainState::execute_block(&parent, block) {
         Err(err) => err,
@@ -219,7 +249,7 @@ fn block_with_bad_transaction_root_fails() {
 fn block_with_bad_state_commitment_fails() {
     let parent = setup_parent_state();
     let mut block = build_valid_block(&parent, vec![signed_tx([1u8; 32], [2u8; 32], 10, 0)]);
-    block.header.state_commitment = [99u8; 32];
+    block.header = with_state_commitment(&block.header, [99u8; 32]);
 
     let err = match ChainState::execute_block(&parent, block) {
         Err(err) => err,
@@ -249,7 +279,7 @@ fn transaction_ordering_affects_root() {
             signed_tx([1u8; 32], [3u8; 32], 5, 1),
         ],
     );
-    block.header.transaction_root = root_reversed;
+    block.header = with_transaction_root(&block.header, root_reversed);
 
     let err = match ChainState::execute_block(&parent, block) {
         Err(err) => err,
@@ -290,4 +320,197 @@ fn replaying_same_block_from_same_state_gives_same_state_commitment() {
         first.get_account(&[3u8; 32]).unwrap(),
         second.get_account(&[3u8; 32]).unwrap()
     );
+}
+
+// --- Day 2, Hour 3: block header validation ---
+
+#[test]
+fn rejects_invalid_parent_hash() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    let root = merkle_root(&[tx.transaction.id()]);
+    // parent has no history yet (tip is None), so genesis convention
+    // requires parent_hash == GENESIS_PARENT_HASH -- this uses something else.
+    let block = Block {
+        header: BlockHeader::new(0, [7u8; 32], root, parent.state_commitment(), [4u8; 32], 0),
+        transactions: vec![tx],
+    };
+
+    let err = ChainState::execute_block(&parent, block).unwrap_err();
+    assert!(matches!(err, StateError::InvalidParentHash));
+}
+
+#[test]
+fn rejects_invalid_block_height() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    let root = merkle_root(&[tx.transaction.id()]);
+    // Genesis convention requires height == 0 when there is no tip yet.
+    let block = Block {
+        header: BlockHeader::new(
+            5,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![tx],
+    };
+
+    let err = ChainState::execute_block(&parent, block).unwrap_err();
+    assert!(matches!(err, StateError::InvalidBlockHeight { .. }));
+}
+
+#[test]
+fn rejects_invalid_transaction_root() {
+    let parent = setup_parent_state();
+    let mut block = build_valid_block(&parent, vec![signed_tx([1u8; 32], [2u8; 32], 10, 0)]);
+    block.header = with_transaction_root(&block.header, merkle_root(&[]));
+
+    let err = ChainState::execute_block(&parent, block).unwrap_err();
+    assert!(matches!(err, StateError::InvalidTransactionRoot));
+}
+
+#[test]
+fn rejects_invalid_block_hash() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    let root = merkle_root(&[tx.transaction.id()]);
+    let mut header = BlockHeader::new(
+        0,
+        GENESIS_PARENT_HASH,
+        root,
+        parent.state_commitment(),
+        [4u8; 32],
+        0,
+    );
+    // Corrupt the cached hash directly -- it no longer matches a fresh
+    // recomputation over the header's other fields.
+    header.block_hash = [42u8; 32];
+
+    let block = Block {
+        header,
+        transactions: vec![tx],
+    };
+
+    let err = ChainState::execute_block(&parent, block).unwrap_err();
+    assert!(matches!(err, StateError::InvalidBlockHash));
+}
+
+// --- Day 2, Hour 4: transaction validation inside block import ---
+//
+// Block import never trusts the mempool: even if a transaction was already
+// checked before it reached the pool, the block executor re-validates
+// everything itself. Per-transaction checks (invalid signature, stale
+// nonce, insufficient balance, fee overflow, integer overflow) are already
+// covered end to end by tests/executor.rs, since execute_block runs every
+// transaction through the same apply_signed_transaction. The tests below
+// cover what's specific to importing a *block* of transactions: duplicates
+// within one block, and replay of a transaction already committed in an
+// earlier block.
+
+#[test]
+fn rejects_duplicate_transactions_inside_block() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    // Same transaction (same from/to/amount/nonce -> same transaction ID)
+    // submitted twice in the same block.
+    let transactions = vec![resign(&tx), resign(&tx)];
+    let root = transaction_root(&transactions);
+    let block = Block {
+        header: BlockHeader::new(
+            0,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions,
+    };
+
+    let err = ChainState::execute_block(&parent, block).unwrap_err();
+
+    assert!(matches!(err, StateError::DuplicateTransactionInBlock));
+    assert_eq!(parent.get_account(&[1u8; 32]).unwrap().balance, 100);
+}
+
+#[test]
+fn rejects_block_with_invalid_signature() {
+    let parent = setup_parent_state();
+    let mut bad_tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    bad_tx.public_key = [9u8; 32];
+    let root = merkle_root(&[bad_tx.transaction.id()]);
+    let block = Block {
+        header: BlockHeader::new(
+            0,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![bad_tx],
+    };
+
+    let err = ChainState::execute_block(&parent, block).unwrap_err();
+
+    assert!(matches!(err, StateError::InvalidSignature));
+    assert_eq!(parent.get_account(&[1u8; 32]).unwrap().balance, 100);
+}
+
+#[test]
+fn rejects_block_with_nonce_gap() {
+    let parent = setup_parent_state();
+    // Alice's current nonce is 0; this transaction skips straight to 2.
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 2);
+    let root = merkle_root(&[tx.transaction.id()]);
+    let block = Block {
+        header: BlockHeader::new(
+            0,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![tx],
+    };
+
+    let err = ChainState::execute_block(&parent, block).unwrap_err();
+
+    assert!(matches!(err, StateError::InvalidNonce { .. }));
+    assert_eq!(parent.get_account(&[1u8; 32]).unwrap().nonce, 0);
+}
+
+#[test]
+fn rejects_block_with_replayed_transaction() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    let tx_id = tx.transaction.id();
+
+    let block_1 = build_valid_block(&parent, vec![resign(&tx)]);
+    let state_after_block_1 = ChainState::execute_block(&parent, block_1).unwrap();
+    assert!(state_after_block_1.contains_transaction_id(&tx_id));
+
+    // A second block, correctly chained onto the first, tries to replay the
+    // exact same transaction that block 1 already committed.
+    let tip = *state_after_block_1.tip().unwrap();
+    let replay_tx = resign(&tx);
+    let root = merkle_root(&[replay_tx.transaction.id()]);
+    let block_2 = Block {
+        header: BlockHeader::new(
+            tip.height + 1,
+            tip.block_hash,
+            root,
+            state_after_block_1.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![replay_tx],
+    };
+
+    let err = ChainState::execute_block(&state_after_block_1, block_2).unwrap_err();
+    assert!(matches!(err, StateError::ReplayedTransaction));
 }

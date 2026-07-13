@@ -1,19 +1,29 @@
 use crate::account::Account;
 use crate::error::StateError;
 use crate::snapshot::StateSnapshot;
-use ::block::block::Block;
+use ::block::block::{Block, BlockHeader, GENESIS_PARENT_HASH};
 use block::merkle_root;
 use primitives::{
-    AccountId, Amount, BASE_FEE, BlockHash,
+    AccountId, Amount, BASE_FEE, BlockHash, TransactionId,
     amount::{checked_add_amount, checked_sub_amount},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use transaction::transaction::SignedTransaction;
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct ChainState {
     accounts: BTreeMap<AccountId, Account>,
     fee_collector: Option<AccountId>,
+    /// The header of the last block that was committed via `execute_block`.
+    /// `None` means this state has no history yet — the next block executed
+    /// against it must satisfy the genesis convention. See
+    /// `docs/block-validation.md`.
+    tip: Option<BlockHeader>,
+    /// Every transaction ID ever committed via `execute_block`, across all
+    /// blocks, kept so a transaction can't be replayed into a later block.
+    /// Unbounded growth is one of the trade-offs of the full-state-cloning
+    /// approach documented in `snapshot.rs` — acceptable for Week 3.
+    included_transaction_ids: BTreeSet<TransactionId>,
 }
 
 impl ChainState {
@@ -21,7 +31,17 @@ impl ChainState {
         Self {
             accounts: BTreeMap::new(),
             fee_collector: None,
+            tip: None,
+            included_transaction_ids: BTreeSet::new(),
         }
+    }
+
+    pub fn tip(&self) -> Option<&BlockHeader> {
+        self.tip.as_ref()
+    }
+
+    pub fn contains_transaction_id(&self, tx_id: &TransactionId) -> bool {
+        self.included_transaction_ids.contains(tx_id)
     }
 
     pub fn create_account(&mut self, account: Account) {
@@ -142,19 +162,69 @@ impl ChainState {
         Ok(())
     }
 
+    /// Validates header fields against the current tip: block hash
+    /// self-consistency, parent linkage (genesis convention if there is no
+    /// tip yet, otherwise the tip's own hash), and height sequencing. See
+    /// `docs/block-validation.md`.
+    fn validate_header(header: &BlockHeader, tip: Option<&BlockHeader>) -> Result<(), StateError> {
+        if !header.verify_hash() {
+            return Err(StateError::InvalidBlockHash);
+        }
+
+        match tip {
+            None => {
+                if header.parent_hash != GENESIS_PARENT_HASH {
+                    return Err(StateError::InvalidParentHash);
+                }
+                if header.height != 0 {
+                    return Err(StateError::InvalidBlockHeight {
+                        expected: 0,
+                        actual: header.height,
+                    });
+                }
+            }
+            Some(parent) => {
+                if header.parent_hash != parent.block_hash {
+                    return Err(StateError::InvalidParentHash);
+                }
+                let expected_height = parent.height + 1;
+                if header.height != expected_height {
+                    return Err(StateError::InvalidBlockHeight {
+                        expected: expected_height,
+                        actual: header.height,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn execute_block(
         parent_state: &ChainState,
         block: Block,
     ) -> Result<ChainState, StateError> {
-        let actual_transaction_root = merkle_root(
-            &block
-                .transactions
-                .iter()
-                .map(|tx| tx.transaction.id())
-                .collect::<Vec<_>>(),
-        );
+        Self::validate_header(&block.header, parent_state.tip.as_ref())?;
+
+        let tx_ids: Vec<TransactionId> = block
+            .transactions
+            .iter()
+            .map(|tx| tx.transaction.id())
+            .collect();
+
+        let actual_transaction_root = merkle_root(&tx_ids);
         if block.header.transaction_root != actual_transaction_root {
             return Err(StateError::InvalidTransactionRoot);
+        }
+
+        let mut seen_in_block = BTreeSet::new();
+        for tx_id in &tx_ids {
+            if !seen_in_block.insert(*tx_id) {
+                return Err(StateError::DuplicateTransactionInBlock);
+            }
+            if parent_state.included_transaction_ids.contains(tx_id) {
+                return Err(StateError::ReplayedTransaction);
+            }
         }
 
         let mut snapshot = StateSnapshot::from_canonical(parent_state);
@@ -167,6 +237,10 @@ impl ChainState {
             return Err(StateError::InvalidStateCommitment);
         }
 
-        Ok(snapshot.into_state())
+        let mut new_state = snapshot.into_state();
+        new_state.included_transaction_ids.extend(tx_ids);
+        new_state.tip = Some(block.header);
+
+        Ok(new_state)
     }
 }

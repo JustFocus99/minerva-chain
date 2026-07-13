@@ -114,26 +114,53 @@ same discipline applied one level up.
 
 ## Implementation status
 
-As of Day 1 (mempool work), `state::chain_state::ChainState::execute_block`
-implements part of this pipeline:
+As of Day 2 Hour 4, `state::chain_state::ChainState::execute_block`
+implements most of this pipeline:
 
+- Step 2 (validate header) / Step 3 (parent hash) / Step 4 (height) —
+  implemented in `ChainState::validate_header`, called first, before any
+  other check. `BlockHeader` now carries a cached `block_hash` (computed
+  once in `BlockHeader::new`) and `ChainState` tracks `tip: Option<BlockHeader>`
+  — the header of the last committed block, `None` if this state has no
+  history yet. When `tip` is `None`, the incoming header must satisfy the
+  genesis convention (`height == 0`, `parent_hash == GENESIS_PARENT_HASH`,
+  a fixed all-zero value). Otherwise it must chain onto the tip:
+  `parent_hash == tip.block_hash` and `height == tip.height + 1`.
+- "Block hash matches header bytes" — implemented as part of the same
+  `validate_header` call, via `BlockHeader::verify_hash()`, which recomputes
+  the hash over the header's other fields and compares it to the cached
+  `block_hash`. This catches a header whose fields were mutated after it
+  was hashed.
 - Step 5 (transaction Merkle root) — implemented: recomputes the root from
   `block.transactions` and compares it to `block.header.transaction_root`.
-- Step 8 (execute transactions against candidate state) — implemented: the
-  function clones `parent_state` into a local `temp_state` and applies each
-  transaction to that clone via `apply_signed_transaction`. `parent_state`
-  itself is never touched — it's an immutable `&ChainState` reference, so
-  the "canonical state untouched on failure" property holds by construction,
-  not just by convention.
+- Step 6 (reject duplicate transaction IDs within a block, and reject a
+  transaction already committed in an earlier block) — implemented as a
+  read-only pre-pass over the block's transaction IDs, before candidate
+  state is even created: a `BTreeSet` catches duplicates within the block
+  (`StateError::DuplicateTransactionInBlock`), and a lookup against
+  `ChainState::included_transaction_ids` (every transaction ID ever
+  committed, carried forward across blocks) catches cross-block replay
+  (`StateError::ReplayedTransaction`).
+- Step 7 (verify signatures) / stale nonce / nonce gaps / insufficient
+  balance / fee overflow / integer overflow — all already covered by
+  `apply_signed_transaction`, which every transaction in the block runs
+  through unchanged; a block is just a sequence of those same per-transaction
+  checks. See `tests/executor.rs` for that coverage and `docs/fee-model.md`
+  for the fee-specific rules.
+- Step 8 (execute transactions against candidate state) — implemented via
+  `StateSnapshot` (see `snapshot.rs`): `parent_state` is only ever borrowed,
+  never mutated, so "canonical state untouched on failure" holds by
+  construction, not just by convention.
 - Step 9 (atomic fee charging) — implemented inside
   `apply_signed_transaction` (see `docs/fee-model.md`).
 - Steps 10–11 (candidate state root, compare declared root) — implemented:
-  `temp_state.state_commitment()` is compared against
+  the snapshot's state commitment is compared against
   `block.header.state_commitment`.
 - Step 12 (commit only after all checks pass) — implemented at the
-  function-return level: `temp_state` is only ever returned as `Ok(..)`
-  after every prior step succeeds; the caller is responsible for actually
-  treating the returned state as the new canonical state.
+  function-return level: the new state (with its tip and included
+  transaction IDs updated) is only ever returned as `Ok(..)` after every
+  prior step succeeds; the caller is responsible for actually treating the
+  returned state as the new canonical state.
 
 Not yet implemented — open work for later hours:
 
@@ -141,18 +168,21 @@ Not yet implemented — open work for later hours:
   `Block` values are constructed directly in Rust. (Same gap as the
   mempool's "malformed transaction bytes" case — see
   `notes/w3d1-mempool.md`.)
-- Step 2 (validate header) as a distinct, explicit check.
-- Step 3 (parent hash validation). `ChainState` currently has no notion of
-  "the hash of the block it was built from," so there is nothing to compare
-  `block.header.parent_hash` against yet.
-- Step 4 (height validation). `ChainState` does not track height at all.
-- Step 6 (explicit duplicate transaction ID rejection within a block).
-  Today, submitting the same transaction twice in one block will usually
-  fail on the second application because the sender's nonce already
-  advanced — but that's an incidental side effect of nonce checking, not a
-  deliberate, explicit duplicate-ID check.
 - Step 13 (persistence). There is no durable storage layer; everything is
-  in-memory `ChainState`.
+  in-memory `ChainState`. `included_transaction_ids` growing without bound
+  across the whole chain's history is the same full-state trade-off
+  documented in `snapshot.rs` — acceptable for Week 3, not for production.
+- "Previous state root" as an explicit header field was considered and
+  deliberately left out: `execute_block` always builds candidate state from
+  the real `parent_state` directly, never from an externally declared
+  "previous state root" value, so there's no untrusted transmission path
+  for a redundant field to protect against yet. Worth revisiting if blocks
+  ever arrive from an untrusted source instead of being constructed
+  in-process.
+- Timestamp was left off `BlockHeader` entirely — no deterministic rule for
+  it has been defined, and the project's determinism requirements
+  (`docs/architecture.md`) explicitly rule out wall-clock time affecting
+  execution.
 
 ## Non-goals for Day 2
 

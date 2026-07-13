@@ -21,6 +21,16 @@ pub enum StateError {
     InvalidTransactionRoot,
     #[error("invalid state commitment")]
     InvalidStateCommitment,
+    #[error("invalid parent hash")]
+    InvalidParentHash,
+    #[error("invalid block height: expected {expected}, got {actual}")]
+    InvalidBlockHeight { expected: u64, actual: u64 },
+    #[error("invalid block hash")]
+    InvalidBlockHash,
+    #[error("duplicate transaction in block")]
+    DuplicateTransactionInBlock,
+    #[error("transaction already included in a previous block")]
+    ReplayedTransaction,
     #[error("fee overflow")]
     FeeOverflow,
     #[error("insufficient fee balance")]
