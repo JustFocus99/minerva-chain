@@ -102,6 +102,26 @@ fn with_state_commitment(header: &BlockHeader, state_commitment: [u8; 32]) -> Bl
     )
 }
 
+/// The rollback pattern: attempt to import a block expected to fail, assert
+/// it actually failed with the expected error, and assert `parent` is
+/// bit-for-bit unchanged. There's no separate `chain.state()` /
+/// `chain.import_block()` split in this codebase -- `ChainState::execute_block`
+/// is a pure function that borrows `parent` immutably and returns a new
+/// state, so `parent` itself is the thing to compare before/after, playing
+/// the role `chain.state()` would in a stateful wrapper.
+fn assert_import_rejected(
+    parent: &ChainState,
+    block: Block,
+    matches_expected: impl Fn(&StateError) -> bool,
+) {
+    let before = parent.clone();
+    match ChainState::execute_block(parent, block) {
+        Ok(_) => panic!("expected block import to fail"),
+        Err(err) => assert!(matches_expected(&err), "unexpected error: {err:?}"),
+    }
+    assert_eq!(*parent, before);
+}
+
 #[test]
 fn valid_block_executes_all_transactions() {
     let parent = setup_parent_state();
@@ -513,4 +533,254 @@ fn rejects_block_with_replayed_transaction() {
 
     let err = ChainState::execute_block(&state_after_block_1, block_2).unwrap_err();
     assert!(matches!(err, StateError::ReplayedTransaction));
+}
+
+// --- Day 2, Hour 5: fee execution atomicity (block level) ---
+//
+// Per-transaction atomicity (checked arithmetic computed before any
+// mutation, fee and transfer moving together or not at all) is exercised
+// directly in tests/executor.rs. This is the block-level case: fee overflow
+// inside a block must reject the whole block, same as any other
+// per-transaction failure.
+
+#[test]
+fn fee_overflow_rejects_block() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], u64::MAX, 0);
+    let root = merkle_root(&[tx.transaction.id()]);
+    let block = Block {
+        header: BlockHeader::new(
+            0,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![tx],
+    };
+
+    assert_import_rejected(&parent, block, |e| matches!(e, StateError::Amount(_)));
+}
+
+// --- Day 2, Hour 6: state root verification ---
+
+#[test]
+fn rejects_invalid_state_root() {
+    let parent = setup_parent_state();
+    let mut block = build_valid_block(&parent, vec![signed_tx([1u8; 32], [2u8; 32], 10, 0)]);
+    block.header = with_state_commitment(&block.header, [99u8; 32]);
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::InvalidStateCommitment)
+    });
+}
+
+#[test]
+fn invalid_state_root_does_not_change_tip() {
+    let parent = setup_parent_state();
+    let mut block = build_valid_block(&parent, vec![signed_tx([1u8; 32], [2u8; 32], 10, 0)]);
+    block.header = with_state_commitment(&block.header, [99u8; 32]);
+    let tip_before = parent.tip().copied();
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::InvalidStateCommitment)
+    });
+
+    assert_eq!(parent.tip().copied(), tip_before);
+}
+
+#[test]
+fn invalid_state_root_does_not_change_accounts() {
+    let parent = setup_parent_state();
+    let mut block = build_valid_block(&parent, vec![signed_tx([1u8; 32], [2u8; 32], 10, 0)]);
+    block.header = with_state_commitment(&block.header, [99u8; 32]);
+    let account_before = parent.get_account(&[1u8; 32]).cloned();
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::InvalidStateCommitment)
+    });
+
+    assert_eq!(parent.get_account(&[1u8; 32]).cloned(), account_before);
+}
+
+// --- Day 2, Hour 7: adversarial block import tests ---
+//
+// Every case below follows the same rollback pattern via
+// assert_import_rejected: attempt an invalid import, confirm it failed with
+// the expected error, confirm `parent` (the "chain state") is completely
+// unchanged. Several of these overlap in substance with the Hour 3/4/5/6
+// tests above (same underlying checks, different names/framing) -- kept
+// anyway since these exact names were requested.
+
+#[test]
+fn invalid_parent_hash() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    let root = merkle_root(&[tx.transaction.id()]);
+    let block = Block {
+        header: BlockHeader::new(0, [7u8; 32], root, parent.state_commitment(), [4u8; 32], 0),
+        transactions: vec![tx],
+    };
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::InvalidParentHash)
+    });
+}
+
+#[test]
+fn invalid_state_root() {
+    let parent = setup_parent_state();
+    let mut block = build_valid_block(&parent, vec![signed_tx([1u8; 32], [2u8; 32], 10, 0)]);
+    block.header = with_state_commitment(&block.header, [99u8; 32]);
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::InvalidStateCommitment)
+    });
+}
+
+#[test]
+fn invalid_transaction_root() {
+    let parent = setup_parent_state();
+    let mut block = build_valid_block(&parent, vec![signed_tx([1u8; 32], [2u8; 32], 10, 0)]);
+    block.header = with_transaction_root(&block.header, merkle_root(&[]));
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::InvalidTransactionRoot)
+    });
+}
+
+#[test]
+fn integer_overflow() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], u64::MAX, 0);
+    let root = merkle_root(&[tx.transaction.id()]);
+    let block = Block {
+        header: BlockHeader::new(
+            0,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![tx],
+    };
+
+    assert_import_rejected(&parent, block, |e| matches!(e, StateError::Amount(_)));
+}
+
+#[test]
+fn duplicate_transactions() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    let transactions = vec![resign(&tx), resign(&tx)];
+    let root = transaction_root(&transactions);
+    let block = Block {
+        header: BlockHeader::new(
+            0,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions,
+    };
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::DuplicateTransactionInBlock)
+    });
+}
+
+#[test]
+fn repeated_block_import() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+
+    let first_import = build_valid_block(&parent, vec![resign(&tx)]);
+    let state_after_first_import = ChainState::execute_block(&parent, first_import).unwrap();
+
+    // Re-import the same block a second time, on top of the state it
+    // already produced. Its parent_hash still points at GENESIS, but the
+    // chain has already moved past that.
+    let repeated = build_valid_block(&parent, vec![resign(&tx)]);
+    assert_import_rejected(&state_after_first_import, repeated, |e| {
+        matches!(e, StateError::InvalidParentHash)
+    });
+}
+
+#[test]
+fn replay_attack() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    let tx_id = tx.transaction.id();
+
+    let block_1 = build_valid_block(&parent, vec![resign(&tx)]);
+    let state_after_block_1 = ChainState::execute_block(&parent, block_1).unwrap();
+    assert!(state_after_block_1.contains_transaction_id(&tx_id));
+
+    let tip = *state_after_block_1.tip().unwrap();
+    let replay_tx = resign(&tx);
+    let root = merkle_root(&[replay_tx.transaction.id()]);
+    let block_2 = Block {
+        header: BlockHeader::new(
+            tip.height + 1,
+            tip.block_hash,
+            root,
+            state_after_block_1.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![replay_tx],
+    };
+
+    assert_import_rejected(&state_after_block_1, block_2, |e| {
+        matches!(e, StateError::ReplayedTransaction)
+    });
+}
+
+#[test]
+fn nonce_gap() {
+    let parent = setup_parent_state();
+    let tx = signed_tx([1u8; 32], [2u8; 32], 10, 2);
+    let root = merkle_root(&[tx.transaction.id()]);
+    let block = Block {
+        header: BlockHeader::new(
+            0,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![tx],
+    };
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::InvalidNonce { .. })
+    });
+}
+
+#[test]
+fn invalid_signature() {
+    let parent = setup_parent_state();
+    let mut bad_tx = signed_tx([1u8; 32], [2u8; 32], 10, 0);
+    bad_tx.public_key = [9u8; 32];
+    let root = merkle_root(&[bad_tx.transaction.id()]);
+    let block = Block {
+        header: BlockHeader::new(
+            0,
+            GENESIS_PARENT_HASH,
+            root,
+            parent.state_commitment(),
+            [4u8; 32],
+            0,
+        ),
+        transactions: vec![bad_tx],
+    };
+
+    assert_import_rejected(&parent, block, |e| {
+        matches!(e, StateError::InvalidSignature)
+    });
 }

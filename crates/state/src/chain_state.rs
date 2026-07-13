@@ -10,7 +10,7 @@ use primitives::{
 use std::collections::{BTreeMap, BTreeSet};
 use transaction::transaction::SignedTransaction;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ChainState {
     accounts: BTreeMap<AccountId, Account>,
     fee_collector: Option<AccountId>,
