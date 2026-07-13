@@ -158,16 +158,16 @@ impl ChainState {
             return Err(StateError::InvalidTransactionRoot);
         }
 
-        let mut temp_state = parent_state.clone();
+        let mut snapshot = crate::snapshot::StateSnapshot::from_canonical(parent_state);
 
         for signed_tx in block.transactions {
-            temp_state.apply_signed_transaction(signed_tx)?;
+            snapshot.apply_signed_transaction(signed_tx)?;
         }
 
-        if block.header.state_commitment != temp_state.state_commitment() {
+        if block.header.state_commitment != snapshot.state_commitment() {
             return Err(StateError::InvalidStateCommitment);
         }
 
-        Ok(temp_state)
+        Ok(snapshot.into_state())
     }
 }
