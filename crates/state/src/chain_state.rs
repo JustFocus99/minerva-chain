@@ -1,4 +1,6 @@
+use crate::account::Account;
 use crate::error::StateError;
+use crate::snapshot::StateSnapshot;
 use ::block::block::Block;
 use block::merkle_root;
 use primitives::{
@@ -10,7 +12,7 @@ use transaction::transaction::SignedTransaction;
 
 #[derive(Default, Clone)]
 pub struct ChainState {
-    accounts: BTreeMap<AccountId, crate::account::Account>,
+    accounts: BTreeMap<AccountId, Account>,
     fee_collector: Option<AccountId>,
 }
 
@@ -22,18 +24,15 @@ impl ChainState {
         }
     }
 
-    pub fn create_account(&mut self, account: crate::account::Account) {
+    pub fn create_account(&mut self, account: Account) {
         self.accounts.insert(account.id, account);
     }
 
-    pub fn get_account(&self, account_id: &AccountId) -> Option<&crate::account::Account> {
+    pub fn get_account(&self, account_id: &AccountId) -> Option<&Account> {
         self.accounts.get(account_id)
     }
 
-    pub fn get_account_mut(
-        &mut self,
-        account_id: &AccountId,
-    ) -> Option<&mut crate::account::Account> {
+    pub fn get_account_mut(&mut self, account_id: &AccountId) -> Option<&mut Account> {
         self.accounts.get_mut(account_id)
     }
 
@@ -47,7 +46,7 @@ impl ChainState {
         self.fee_collector
     }
 
-    pub fn fee_collector_account(&self) -> Option<&crate::account::Account> {
+    pub fn fee_collector_account(&self) -> Option<&Account> {
         self.fee_collector.and_then(|id| self.accounts.get(&id))
     }
 
@@ -158,7 +157,7 @@ impl ChainState {
             return Err(StateError::InvalidTransactionRoot);
         }
 
-        let mut snapshot = crate::snapshot::StateSnapshot::from_canonical(parent_state);
+        let mut snapshot = StateSnapshot::from_canonical(parent_state);
 
         for signed_tx in block.transactions {
             snapshot.apply_signed_transaction(signed_tx)?;
