@@ -4,7 +4,7 @@ use crypto::{
 };
 use primitives::{AccountId, Amount, Nonce, PublicKeyBytes, SignatureBytes, TransactionId};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnsignedTransaction {
     pub from: AccountId,
     pub to: AccountId,
@@ -31,7 +31,7 @@ impl UnsignedTransaction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SignedTransaction {
     pub transaction: UnsignedTransaction,
     pub public_key: PublicKeyBytes,

@@ -45,7 +45,8 @@ cargo test
 
 ## Current Week 3 status
 
-Week 3 work is in progress on the mempool and fee model. So far:
+Week 3 work is in progress on the mempool, fee model, and durable storage.
+So far:
 
 - Implemented a nonce-aware transaction pool.
 - Added duplicate transaction rejection.
@@ -53,13 +54,24 @@ Week 3 work is in progress on the mempool and fee model. So far:
 - Added future nonce queueing.
 - Added stale nonce rejection.
 - Added deterministic transaction ordering.
+- Implemented an append-only on-disk block log with a checksummed record
+  format (`crates/storage`).
+- Implemented crash recovery: scans the log from the start, accepts valid
+  records, and stops at the first corrupted or partial one — never skips
+  over damaged bytes to resync on something that looks valid further in.
+- Added a `chain` crate that ties block validation/execution to storage:
+  a block is only treated as imported (canonical state and tip updated)
+  once both validation *and* the durable storage append have succeeded.
 
 This is a snapshot of in-progress work, not a finished system. There is no
 networking, no block producer that actually pulls from the pool, no pool
 size limits or eviction, and no guarantee that a transaction accepted into
-the pool is still valid by the time it would be included in a block. See
-`notes/w3d1-mempool.md` and `docs/fee-model.md` for the detailed design and
-implementation notes.
+the pool is still valid by the time it would be included in a block.
+Recovery also does not yet verify that consecutive records actually chain
+to each other (parent hash / height) — only that each record is valid on
+its own. See `notes/w3d1-mempool.md`, `docs/fee-model.md`,
+`notes/day-03-storage-recovery.md`, and `docs/storage.md` for the detailed
+design and implementation notes.
 
 ## Limitations
 

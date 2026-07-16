@@ -27,6 +27,9 @@ pub fn sample_block(height: u64, parent_hash: BlockHash, seed: u8) -> Block {
     );
     Block {
         header,
-        transactions: vec![sample_transaction(seed), sample_transaction(seed.wrapping_add(10))],
+        transactions: vec![
+            sample_transaction(seed),
+            sample_transaction(seed.wrapping_add(10)),
+        ],
     }
 }

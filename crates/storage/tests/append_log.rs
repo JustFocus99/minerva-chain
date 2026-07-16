@@ -61,9 +61,16 @@ fn loaded_blocks_match_written_blocks() {
 
     for (loaded_block, original_block) in loaded.iter().zip([&block0, &block1]) {
         assert_eq!(loaded_block.header, original_block.header);
-        assert_eq!(loaded_block.transactions.len(), original_block.transactions.len());
+        assert_eq!(
+            loaded_block.transactions.len(),
+            original_block.transactions.len()
+        );
 
-        for (loaded_tx, original_tx) in loaded_block.transactions.iter().zip(&original_block.transactions) {
+        for (loaded_tx, original_tx) in loaded_block
+            .transactions
+            .iter()
+            .zip(&original_block.transactions)
+        {
             assert_eq!(loaded_tx.transaction.from, original_tx.transaction.from);
             assert_eq!(loaded_tx.transaction.to, original_tx.transaction.to);
             assert_eq!(loaded_tx.transaction.amount, original_tx.transaction.amount);

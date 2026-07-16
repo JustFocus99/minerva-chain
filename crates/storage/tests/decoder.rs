@@ -43,7 +43,10 @@ fn rejects_wrong_version() {
     bytes[4] = 99;
 
     let err = record::decode_record(&bytes, 0).expect_err("unsupported version must be rejected");
-    assert!(matches!(err, StorageError::UnsupportedVersion { version: 99, .. }));
+    assert!(matches!(
+        err,
+        StorageError::UnsupportedVersion { version: 99, .. }
+    ));
 }
 
 #[test]

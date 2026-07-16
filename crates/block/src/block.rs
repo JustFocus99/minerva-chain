@@ -25,7 +25,7 @@ pub struct BlockHeader {
     pub block_hash: BlockHash,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub header: BlockHeader,
     pub transactions: Vec<SignedTransaction>,

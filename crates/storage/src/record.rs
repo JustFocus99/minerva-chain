@@ -116,7 +116,10 @@ fn decode_block(payload: &[u8]) -> Result<Block, String> {
         ));
     }
 
-    Ok(Block { header, transactions })
+    Ok(Block {
+        header,
+        transactions,
+    })
 }
 
 /// Encodes everything in a record except the trailing commit marker byte:

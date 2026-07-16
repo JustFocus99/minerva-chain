@@ -204,20 +204,62 @@ recovery is just block import (`docs/block-validation.md`'s pipeline) run
 against blocks whose bytes happen to come from disk instead of from a live
 producer. It does not get its own, looser set of rules.
 
+## Implementation status
+
+As of Day 3, this format and its recovery procedure are implemented:
+
+- **Record encode/decode** (`crates/storage/src/record.rs`) — `encode_block`
+  / `decode_block` implement the payload encoding referenced below;
+  `encode_record_without_marker` / `decode_record` implement the full
+  record layout and validity rules 1–7 above, checked in the documented
+  order, each with its own `StorageError` variant carrying the byte offset.
+- **`AppendOnlyBlockStore`** (`crates/storage/src/append_log.rs`) —
+  `append_block` performs the two-phase write from "The commit marker"
+  above: write + `fsync` the body, then write + `fsync` the marker, as two
+  separate steps.
+- **Recovery** (`crates/storage/src/recovery.rs`) — scans from byte 0,
+  accepts records via `decode_record`, and stops at the first one that
+  fails, exactly per "Stopping, not skipping": a record after a corrupt one
+  is never independently considered, even if it would decode cleanly on
+  its own. See `crates/storage/tests/recovery.rs` for the interrupted-write
+  and middle-corruption cases, and `crates/storage/tests/decoder.rs` for
+  the per-field rejection cases.
+- **Import integration** — `crates/chain`'s `Chain::import_block` is the
+  caller referenced throughout this doc ("only write it once it's
+  canonical"): it runs `ChainState::execute_block` first, calls
+  `BlockStore::append_block` only if that succeeds, and only then replaces
+  canonical state. If storage append fails, canonical state and the tip are
+  left untouched — the candidate state `execute_block` produced is simply
+  dropped. See `docs/block-validation.md` step 13 and
+  `crates/chain/tests/import.rs`.
+
+**Known gap:** recovery and `load_blocks` validate each record in
+isolation — magic, version, length, checksum, and the record's own
+`hash == recompute(header fields)` check, per record. Neither currently
+checks that record N+1's `parent_hash` equals record N's `block_hash`, or
+that heights are sequential, while scanning the log. A structurally valid,
+checksum-correct record for the wrong block (out of order, or belonging to
+a different fork) would currently be accepted by `recover()` on its own.
+That check only happens if/when a block is replayed through
+`ChainState::execute_block`'s header validation — and nothing in this
+codebase yet replays a whole recovered log through `ChainState` at
+startup, so this is a live gap, not just a theoretical one. Closing it
+means adding either an inter-record chain-linkage check to recovery itself,
+or a "hydrate `ChainState` by replaying the recovered log" step that runs
+before the node accepts new blocks.
+
 ## Open questions / follow-up work
 
-- **Payload encoding.** This doc defines the record framing around a
-  payload but does not specify how `Block` (header + `Vec<SignedTransaction>`)
-  is encoded into `payload` bytes. `docs/block-validation.md` step 1
-  ("decode block") has the same open gap — there is no wire format for
-  `Block` in this codebase yet. Resolving that is a prerequisite for
-  implementing `payload` encode/decode here.
-- **`MAX_PAYLOAD_LEN`.** A concrete sanity bound for `length` needs a
-  number; left unspecified pending real block-size expectations.
 - **CRC32 vs. a stronger hash.** CRC32 is a cheap check against accidental
   corruption (bit flips, truncation), not an adversarial one — a party who
   can rewrite arbitrary bytes on disk can also recompute a matching CRC32.
   `BlockHeader::block_hash` (step 6 of validity) is the field actually
   carrying cryptographic weight here; CRC32 exists purely as a fast
   first-pass integrity check before paying for decode + hash
-  verification.
+  verification. Note that `block_hash` itself is only a self-consistency
+  check (the header hashes to what it claims), not a signature — it does
+  not prove the block came from a legitimate producer, only that it wasn't
+  bit-flipped in transit/at rest.
+- **`MAX_PAYLOAD_LEN`.** Set to 16 MiB (`crates/storage/src/record.rs`) as
+  a provisional sanity bound, not a value derived from real block-size
+  expectations — revisit once there's an actual block-size budget.

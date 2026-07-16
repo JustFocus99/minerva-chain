@@ -7,5 +7,6 @@ members = [
     "crates/block",
     "crates/mempool",
     "crates/storage",
+    "crates/chain",
 ]
 resolver = "2"

@@ -161,6 +161,16 @@ implements most of this pipeline:
   transaction IDs updated) is only ever returned as `Ok(..)` after every
   prior step succeeds; the caller is responsible for actually treating the
   returned state as the new canonical state.
+- Step 13 (persistence). Implemented by the `chain` crate: `Chain::import_block`
+  calls `ChainState::execute_block` first, appends the block to a
+  `storage::BlockStore` only if that succeeds, and only then replaces
+  canonical state (`self.state = candidate_state`). If storage append
+  fails, canonical state — including the tip — is left exactly as it was;
+  the candidate state produced by `execute_block` is simply dropped. See
+  `docs/storage.md` and `crates/chain/tests/import.rs`.
+  `included_transaction_ids` growing without bound across the whole chain's
+  history is still the same full-state trade-off documented in
+  `snapshot.rs` — acceptable for Week 3, not for production.
 
 Not yet implemented — open work for later hours:
 
@@ -168,10 +178,6 @@ Not yet implemented — open work for later hours:
   `Block` values are constructed directly in Rust. (Same gap as the
   mempool's "malformed transaction bytes" case — see
   `notes/w3d1-mempool.md`.)
-- Step 13 (persistence). There is no durable storage layer; everything is
-  in-memory `ChainState`. `included_transaction_ids` growing without bound
-  across the whole chain's history is the same full-state trade-off
-  documented in `snapshot.rs` — acceptable for Week 3, not for production.
 - "Previous state root" as an explicit header field was considered and
   deliberately left out: `execute_block` always builds candidate state from
   the real `parent_state` directly, never from an externally declared

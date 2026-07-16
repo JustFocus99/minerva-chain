@@ -1,0 +1,15 @@
+[package]
+name = "chain"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+block = { path = "../block" }
+state = { path = "../state" }
+storage = { path = "../storage" }
+thiserror = "1"
+
+[dev-dependencies]
+primitives = { path = "../primitives" }
+transaction = { path = "../transaction" }
+tempfile = "3"

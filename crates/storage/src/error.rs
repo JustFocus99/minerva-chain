@@ -19,7 +19,11 @@ pub enum StorageError {
     UnsupportedVersion { offset: usize, version: u8 },
 
     #[error("record length {length} at offset {offset} is not sane (max {max})")]
-    InvalidLength { offset: usize, length: u32, max: u32 },
+    InvalidLength {
+        offset: usize,
+        length: u32,
+        max: u32,
+    },
 
     #[error(
         "record at offset {offset} is truncated: expected {expected} more bytes, found {found}"
