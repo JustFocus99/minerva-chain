@@ -16,7 +16,7 @@ use crate::record;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryReport {
     /// Number of records accepted, from the start of the file.
-    pub accepted_records: usize,
+    pub valid_records: usize,
     /// File length before recovery ran.
     pub original_len: u64,
     /// File length after recovery ran (== `original_len` if nothing was
@@ -25,9 +25,9 @@ pub struct RecoveryReport {
     /// `original_len - final_len`. Zero if the file needed no truncation.
     pub truncated_bytes: u64,
     /// Height of the last accepted record, if any were accepted.
-    pub last_accepted_height: Option<BlockHeight>,
+    pub last_valid_height: Option<BlockHeight>,
     /// Block hash of the last accepted record, if any were accepted.
-    pub last_accepted_hash: Option<BlockHash>,
+    pub last_valid_hash: Option<BlockHash>,
     /// Why the scan stopped before the end of the file, if it did.
     pub rejected_reason: Option<String>,
 }
@@ -48,17 +48,17 @@ pub fn recover(path: &Path, file: &File) -> Result<RecoveryReport, StorageError>
     let original_len = bytes.len() as u64;
 
     let mut offset = 0usize;
-    let mut accepted_records = 0usize;
-    let mut last_accepted_height = None;
-    let mut last_accepted_hash = None;
+    let mut valid_records = 0usize;
+    let mut last_valid_height = None;
+    let mut last_valid_hash = None;
     let mut rejected_reason = None;
 
     while offset < bytes.len() {
         match record::decode_record(&bytes, offset) {
             Ok((block, record_len)) => {
-                accepted_records += 1;
-                last_accepted_height = Some(block.header.height);
-                last_accepted_hash = Some(block.header.block_hash);
+                valid_records += 1;
+                last_valid_height = Some(block.header.height);
+                last_valid_hash = Some(block.header.block_hash);
                 offset += record_len;
             }
             Err(err) => {
@@ -74,12 +74,12 @@ pub fn recover(path: &Path, file: &File) -> Result<RecoveryReport, StorageError>
     }
 
     Ok(RecoveryReport {
-        accepted_records,
+        valid_records,
         original_len,
         final_len,
         truncated_bytes: original_len - final_len,
-        last_accepted_height,
-        last_accepted_hash,
+        last_valid_height,
+        last_valid_hash,
         rejected_reason,
     })
 }

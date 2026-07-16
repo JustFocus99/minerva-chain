@@ -1,37 +1,7 @@
-use block::block::{Block, BlockHeader};
+mod common;
+
 use block::GENESIS_PARENT_HASH;
-use primitives::{BlockHash, TransactionRoot};
 use storage::{AppendOnlyBlockStore, BlockStore};
-use transaction::transaction::{SignedTransaction, UnsignedTransaction};
-
-fn account(seed: u8) -> [u8; 32] {
-    [seed; 32]
-}
-
-fn sample_transaction(seed: u8) -> SignedTransaction {
-    let unsigned = UnsignedTransaction {
-        from: account(seed),
-        to: account(seed.wrapping_add(1)),
-        amount: 10 + seed as u64,
-        nonce: seed as u64,
-    };
-    SignedTransaction::sign(unsigned)
-}
-
-fn sample_block(height: u64, parent_hash: BlockHash, seed: u8) -> Block {
-    let header = BlockHeader::new(
-        height,
-        parent_hash,
-        TransactionRoot::new([seed; 32]),
-        [seed.wrapping_add(2); 32],
-        [seed.wrapping_add(3); 32],
-        seed as u64,
-    );
-    Block {
-        header,
-        transactions: vec![sample_transaction(seed), sample_transaction(seed.wrapping_add(10))],
-    }
-}
 
 #[test]
 fn appends_single_block() {
@@ -39,7 +9,7 @@ fn appends_single_block() {
     let path = dir.path().join("blocks.log");
 
     let mut store = AppendOnlyBlockStore::open(&path).expect("open store");
-    let block = sample_block(0, GENESIS_PARENT_HASH, 1);
+    let block = common::sample_block(0, GENESIS_PARENT_HASH, 1);
     store.append_block(&block).expect("append block");
 
     let bytes = std::fs::read(&path).expect("read log file");
@@ -57,13 +27,13 @@ fn appends_multiple_blocks() {
 
     let mut store = AppendOnlyBlockStore::open(&path).expect("open store");
 
-    let block0 = sample_block(0, GENESIS_PARENT_HASH, 1);
+    let block0 = common::sample_block(0, GENESIS_PARENT_HASH, 1);
     store.append_block(&block0).expect("append block 0");
 
-    let block1 = sample_block(1, block0.header.block_hash, 2);
+    let block1 = common::sample_block(1, block0.header.block_hash, 2);
     store.append_block(&block1).expect("append block 1");
 
-    let block2 = sample_block(2, block1.header.block_hash, 3);
+    let block2 = common::sample_block(2, block1.header.block_hash, 3);
     store.append_block(&block2).expect("append block 2");
 
     let loaded = store.load_blocks().expect("load blocks");
@@ -80,8 +50,8 @@ fn loaded_blocks_match_written_blocks() {
 
     let mut store = AppendOnlyBlockStore::open(&path).expect("open store");
 
-    let block0 = sample_block(0, GENESIS_PARENT_HASH, 10);
-    let block1 = sample_block(1, block0.header.block_hash, 20);
+    let block0 = common::sample_block(0, GENESIS_PARENT_HASH, 10);
+    let block1 = common::sample_block(1, block0.header.block_hash, 20);
 
     store.append_block(&block0).expect("append block 0");
     store.append_block(&block1).expect("append block 1");
