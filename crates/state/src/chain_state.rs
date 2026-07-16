@@ -200,7 +200,37 @@ impl ChainState {
         Ok(())
     }
 
+    /// Validates and executes `block` against `parent_state`, logging
+    /// exactly one `block_validation_started` event on entry and one
+    /// `block_validation_failed` event if any gate rejects it -- see
+    /// `docs/logging.md`. The actual pipeline is unchanged, in
+    /// `execute_block_inner`; this is just the logging boundary around it.
     pub fn execute_block(
+        parent_state: &ChainState,
+        block: Block,
+    ) -> Result<ChainState, StateError> {
+        let height = block.header.height;
+        let block_hash = block.header.block_hash;
+        let parent_hash = block.header.parent_hash;
+
+        tracing::info!(
+            height,
+            block_hash = %primitives::to_hex(&block_hash),
+            parent_hash = %primitives::to_hex(&parent_hash),
+            "block_validation_started"
+        );
+
+        Self::execute_block_inner(parent_state, block).inspect_err(|error| {
+            tracing::warn!(
+                height,
+                block_hash = %primitives::to_hex(&block_hash),
+                error = %error,
+                "block_validation_failed"
+            );
+        })
+    }
+
+    fn execute_block_inner(
         parent_state: &ChainState,
         block: Block,
     ) -> Result<ChainState, StateError> {

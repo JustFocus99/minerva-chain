@@ -40,6 +40,14 @@ impl<S: BlockStore> Chain<S> {
         self.store.append_block(&block)?;
 
         self.state = candidate_state;
+
+        tracing::info!(
+            height = block.header.height,
+            block_hash = %primitives::to_hex(&block.header.block_hash),
+            parent_hash = %primitives::to_hex(&block.header.parent_hash),
+            state_root = %primitives::to_hex(&self.state.state_commitment()),
+            "block_imported"
+        );
         Ok(())
     }
 }

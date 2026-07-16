@@ -38,19 +38,41 @@ pub struct ReplayResult {
 /// aborts the whole replay; there is no partial or best-effort result.
 /// See docs/replay.md.
 pub fn replay_chain(genesis: GenesisConfig, blocks: &[Block]) -> Result<ReplayResult, ReplayError> {
+    tracing::info!(block_count = blocks.len(), "replay_started");
+
     let mut state = genesis.build_state();
 
     for (index, block) in blocks.iter().enumerate() {
         let height = block.header.height;
-        state = ChainState::execute_block(&state, block.clone())
-            .map_err(|source| ReplayError { index, height, source })?;
+        state = ChainState::execute_block(&state, block.clone()).map_err(|source| {
+            tracing::warn!(
+                index,
+                height,
+                block_hash = %primitives::to_hex(&block.header.block_hash),
+                error = %source,
+                "replay_failed"
+            );
+            ReplayError { index, height, source }
+        })?;
     }
 
     let tip = state.tip().copied();
+    let final_state_root = state.state_commitment();
+    let tip_hash = tip.map(|header| header.block_hash);
+    let height = tip.map(|header| header.height);
+
+    tracing::info!(
+        blocks_replayed = blocks.len(),
+        state_root = %primitives::to_hex(&final_state_root),
+        height = ?height,
+        block_hash = ?tip_hash.map(|hash| primitives::to_hex(&hash)),
+        "replay_completed"
+    );
+
     Ok(ReplayResult {
-        final_state_root: state.state_commitment(),
-        tip_hash: tip.map(|header| header.block_hash),
-        height: tip.map(|header| header.height),
+        final_state_root,
+        tip_hash,
+        height,
         blocks_replayed: blocks.len(),
         final_state: state,
     })

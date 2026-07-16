@@ -44,6 +44,8 @@ impl RecoveryReport {
 /// stopping at the first invalid or partial one. Truncates `file` to the
 /// end of the last accepted record and returns a report of what happened.
 pub fn recover(path: &Path, file: &File) -> Result<RecoveryReport, StorageError> {
+    tracing::info!("storage_recovery_started");
+
     let bytes = std::fs::read(path)?;
     let original_len = bytes.len() as u64;
 
@@ -72,6 +74,15 @@ pub fn recover(path: &Path, file: &File) -> Result<RecoveryReport, StorageError>
     if final_len != original_len {
         file.set_len(final_len)?;
     }
+
+    tracing::info!(
+        valid_records,
+        truncated_bytes = original_len - final_len,
+        height = ?last_valid_height,
+        block_hash = ?last_valid_hash.map(|hash| primitives::to_hex(&hash)),
+        error = ?rejected_reason,
+        "storage_recovery_completed"
+    );
 
     Ok(RecoveryReport {
         valid_records,

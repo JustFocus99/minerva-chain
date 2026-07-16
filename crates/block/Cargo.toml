@@ -8,3 +8,4 @@ primitives = { path = "../primitives" }
 transaction = { path = "../transaction" }
 crypto = { path = "../crypto" }
 thiserror = "1"
+tracing = "0.1"

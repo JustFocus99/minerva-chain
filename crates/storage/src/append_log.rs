@@ -62,6 +62,12 @@ impl BlockStore for AppendOnlyBlockStore {
         self.file.flush()?;
         self.file.sync_data()?;
 
+        tracing::info!(
+            height = block.header.height,
+            block_hash = %primitives::to_hex(&block.header.block_hash),
+            parent_hash = %primitives::to_hex(&block.header.parent_hash),
+            "storage_record_appended"
+        );
         Ok(())
     }
 

@@ -8,6 +8,7 @@ primitives = { path = "../primitives" }
 transaction = { path = "../transaction" }
 block = { path = "../block" }
 thiserror = "1"
+tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

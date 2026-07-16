@@ -133,6 +133,23 @@ $BIN tip --data-dir ./nodeB
 # tip: height 0 -> <same hash nodeA produced>
 ```
 
+## Logs
+
+Every command prints structured logs to stderr, at `info` level by
+default. Set `RUST_LOG` to change what's shown (e.g.
+`RUST_LOG=debug`, or `RUST_LOG=storage=trace` to see just the storage
+crate at trace level). See `docs/logging.md` for the full event catalog
+(`transaction_submitted`, `block_imported`, `replay_completed`, etc.) and
+what fields each one carries:
+
+```bash
+$BIN produce-block --data-dir ./data
+# <timestamp>  INFO state: block_validation_started height=1 block_hash=... parent_hash=...
+# <timestamp>  INFO storage: storage_record_appended height=1 block_hash=... parent_hash=...
+# <timestamp>  INFO chain: block_imported height=1 block_hash=... parent_hash=... state_root=...
+# produced block 1 (1 tx) -> ...
+```
+
 ## Non-goals
 
 No networking, no key management (transactions use the deterministic

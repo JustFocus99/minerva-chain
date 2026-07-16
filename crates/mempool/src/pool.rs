@@ -31,11 +31,51 @@ impl TransactionPool {
         }
     }
 
+    /// Admits `tx` into the pool (or rejects it), then logs exactly one
+    /// `transaction_submitted` or `transaction_rejected` event describing
+    /// the outcome -- see `docs/logging.md`. `tx_id`/`account_id` are
+    /// captured before `try_admit` can move `tx` into the pool, since both
+    /// are `Copy` and cheap to hold onto regardless of outcome.
     pub fn submit_transaction(
         &mut self,
         tx: SignedTransaction,
         current_state: &ChainState,
     ) -> PoolAdmission {
+        let tx_id = tx.transaction.id();
+        let account_id = tx.transaction.from;
+
+        let admission = self.try_admit(tx, current_state);
+
+        match &admission {
+            PoolAdmission::Accepted | PoolAdmission::QueuedForFutureNonce => {
+                tracing::info!(
+                    tx_id = %primitives::to_hex(tx_id.as_bytes()),
+                    account_id = %primitives::to_hex(&account_id),
+                    "transaction_submitted"
+                );
+            }
+            PoolAdmission::Duplicate => {
+                tracing::warn!(
+                    tx_id = %primitives::to_hex(tx_id.as_bytes()),
+                    account_id = %primitives::to_hex(&account_id),
+                    error = "duplicate transaction id",
+                    "transaction_rejected"
+                );
+            }
+            PoolAdmission::Rejected(error) => {
+                tracing::warn!(
+                    tx_id = %primitives::to_hex(tx_id.as_bytes()),
+                    account_id = %primitives::to_hex(&account_id),
+                    error = %error,
+                    "transaction_rejected"
+                );
+            }
+        }
+
+        admission
+    }
+
+    fn try_admit(&mut self, tx: SignedTransaction, current_state: &ChainState) -> PoolAdmission {
         let tx_id = tx.transaction.id();
         if self.contains_transaction_id(&tx_id) {
             return PoolAdmission::Duplicate;

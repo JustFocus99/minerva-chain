@@ -101,7 +101,23 @@ impl ForkTree {
             .push(hash);
         self.blocks_by_hash.insert(hash, header);
 
-        self.canonical_tip_hash = self.choose_tip().tip_hash;
+        let previous_tip_hash = self.canonical_tip_hash;
+        let new_tip = self.choose_tip();
+        self.canonical_tip_hash = new_tip.tip_hash;
+
+        // Only log when the canonical tip actually changes -- inserting a
+        // block that loses the fork-choice comparison (a known
+        // non-canonical branch) is not itself a tip change. See
+        // docs/fork-choice.md and docs/logging.md.
+        if new_tip.tip_hash != previous_tip_hash {
+            tracing::info!(
+                block_hash = %primitives::to_hex(&new_tip.tip_hash),
+                height = new_tip.height,
+                parent_hash = ?self.parent_by_hash.get(&new_tip.tip_hash).map(|hash| primitives::to_hex(hash)),
+                "fork_choice_updated"
+            );
+        }
+
         Ok(InsertOutcome::Inserted)
     }
 

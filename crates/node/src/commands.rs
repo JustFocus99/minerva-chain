@@ -10,7 +10,7 @@ use block::{GENESIS_PARENT_HASH, merkle_root};
 use chain::Chain;
 use execution::GenesisConfig;
 use mempool::pool::{PoolAdmission, TransactionPool};
-use primitives::{AccountId, Amount, Nonce};
+use primitives::{AccountId, Amount, Nonce, to_hex as hex};
 use state::chain_state::ChainState;
 use storage::{AppendOnlyBlockStore, BlockStore, record};
 use transaction::transaction::{SignedTransaction, UnsignedTransaction};
@@ -53,10 +53,6 @@ fn demo_genesis() -> GenesisConfig {
         .chain(std::iter::once((fee_collector, 0)))
         .collect();
     GenesisConfig::new(accounts, fee_collector)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[derive(Debug, thiserror::Error)]

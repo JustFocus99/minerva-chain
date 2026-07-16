@@ -9,3 +9,5 @@ transaction = { path = "../transaction" }
 crypto = { path = "../crypto" }
 block = { path = "../block" }
 state = { path="../state" }
+thiserror = "1"
+tracing = "0.1"
