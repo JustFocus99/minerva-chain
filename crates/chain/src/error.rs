@@ -1,3 +1,4 @@
+use execution::ReplayError;
 use state::error::StateError;
 use storage::StorageError;
 use thiserror::Error;
@@ -13,4 +14,19 @@ pub enum ImportError {
     Validation(#[from] StateError),
     #[error("failed to persist block to storage: {0}")]
     Storage(#[from] StorageError),
+}
+
+/// Why `Chain::from_storage` (node restart / cold start) failed. Recovery
+/// truncating a corrupted or partial tail is *not* a failure here -- that's
+/// the expected, survivable case documented in `docs/storage.md` and
+/// `docs/replay.md`. This only fires if the storage layer itself errors
+/// (e.g. an I/O failure), or if the structurally-clean blocks recovery
+/// hands back fail to replay -- which per `docs/replay.md` is fatal, not
+/// something to route around.
+#[derive(Debug, Error)]
+pub enum StartupError {
+    #[error("failed to load block log: {0}")]
+    Storage(#[from] StorageError),
+    #[error("replay failed: {0}")]
+    Replay(#[from] ReplayError),
 }

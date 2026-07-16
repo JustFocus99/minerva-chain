@@ -11,8 +11,8 @@ use crate::error::ImportError;
 /// left exactly as it was. See docs/block-validation.md step 13 and
 /// docs/storage.md.
 pub struct Chain<S: BlockStore> {
-    state: ChainState,
-    store: S,
+    pub(crate) state: ChainState,
+    pub(crate) store: S,
 }
 
 impl<S: BlockStore> Chain<S> {
