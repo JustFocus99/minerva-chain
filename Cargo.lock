@@ -249,6 +249,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "node"
+version = "0.1.0"
+dependencies = [
+ "block",
+ "chain",
+ "crypto",
+ "execution",
+ "mempool",
+ "primitives",
+ "state",
+ "storage",
+ "thiserror",
+ "transaction",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

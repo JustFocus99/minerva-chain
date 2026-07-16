@@ -9,5 +9,6 @@ members = [
     "crates/storage",
     "crates/chain",
     "crates/execution",
+    "crates/node",
 ]
 resolver = "2"

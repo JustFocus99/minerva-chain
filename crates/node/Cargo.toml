@@ -1,0 +1,20 @@
+[package]
+name = "node"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "minerva-node"
+path = "src/main.rs"
+
+[dependencies]
+primitives = { path = "../primitives" }
+crypto = { path = "../crypto" }
+block = { path = "../block" }
+transaction = { path = "../transaction" }
+state = { path = "../state" }
+mempool = { path = "../mempool" }
+storage = { path = "../storage" }
+chain = { path = "../chain" }
+execution = { path = "../execution" }
+thiserror = "1"
