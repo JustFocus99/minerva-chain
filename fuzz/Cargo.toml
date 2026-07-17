@@ -11,6 +11,9 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 storage = { path = "../crates/storage" }
 transaction = { path = "../crates/transaction" }
+primitives = { path = "../crates/primitives" }
+state = { path = "../crates/state" }
+tempfile = "3"
 
 [[bin]]
 name = "transaction_decoder"
@@ -22,6 +25,20 @@ bench = false
 [[bin]]
 name = "block_decoder"
 path = "fuzz_targets/block_decoder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "state_transition_input"
+path = "fuzz_targets/state_transition_input.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "storage_recovery"
+path = "fuzz_targets/storage_recovery.rs"
 test = false
 doc = false
 bench = false
