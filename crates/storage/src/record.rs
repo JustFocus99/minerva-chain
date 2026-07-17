@@ -37,6 +37,61 @@ fn read_array<const N: usize>(bytes: &[u8], cursor: &mut usize) -> Result<[u8; N
     Ok(array)
 }
 
+/// Fixed-size wire encoding for one `SignedTransaction`: `from(32) +
+/// to(32) + amount(8 LE) + nonce(8 LE) + public_key(32) + signature(64)`.
+/// Used both inside a block's payload (`encode_block`/`decode_block`) and
+/// fuzzed on its own -- see `fuzz/fuzz_targets/transaction_decoder.rs`.
+pub const TRANSACTION_RECORD_LEN: usize = 32 + 32 + 8 + 8 + 32 + 64;
+
+pub fn encode_signed_transaction(tx: &SignedTransaction) -> [u8; TRANSACTION_RECORD_LEN] {
+    let mut buf = [0u8; TRANSACTION_RECORD_LEN];
+    buf[0..32].copy_from_slice(&tx.transaction.from);
+    buf[32..64].copy_from_slice(&tx.transaction.to);
+    buf[64..72].copy_from_slice(&tx.transaction.amount.to_le_bytes());
+    buf[72..80].copy_from_slice(&tx.transaction.nonce.to_le_bytes());
+    buf[80..112].copy_from_slice(&tx.public_key);
+    buf[112..176].copy_from_slice(&tx.signature);
+    buf
+}
+
+/// Inverse of [`encode_signed_transaction`]. Rejects anything that isn't
+/// exactly `TRANSACTION_RECORD_LEN` bytes; every other step is a fixed-size
+/// array copy or a `from_le_bytes` parse, neither of which can fail or
+/// panic once the length check passes -- `bytes` is otherwise
+/// unconstrained. This is a *structural* decode only: it does not check
+/// that the signature verifies, that `from` names a real account, or
+/// anything else `SignedTransaction::verify` /
+/// `state::ChainState::apply_signed_transaction` are responsible for.
+pub fn decode_signed_transaction(bytes: &[u8]) -> Result<SignedTransaction, StorageError> {
+    let bytes: &[u8; TRANSACTION_RECORD_LEN] =
+        bytes
+            .try_into()
+            .map_err(|_| StorageError::Decode {
+                offset: 0,
+                reason: format!(
+                    "transaction record must be exactly {TRANSACTION_RECORD_LEN} bytes, found {}",
+                    bytes.len()
+                ),
+            })?;
+
+    let mut from: AccountId = [0u8; 32];
+    from.copy_from_slice(&bytes[0..32]);
+    let mut to: AccountId = [0u8; 32];
+    to.copy_from_slice(&bytes[32..64]);
+    let amount = Amount::from_le_bytes(bytes[64..72].try_into().unwrap());
+    let nonce = Nonce::from_le_bytes(bytes[72..80].try_into().unwrap());
+    let mut public_key: PublicKeyBytes = [0u8; 32];
+    public_key.copy_from_slice(&bytes[80..112]);
+    let mut signature: SignatureBytes = [0u8; 64];
+    signature.copy_from_slice(&bytes[112..176]);
+
+    Ok(SignedTransaction {
+        transaction: UnsignedTransaction { from, to, amount, nonce },
+        public_key,
+        signature,
+    })
+}
+
 /// Deterministically encodes a block's header and transactions into the
 /// record's `payload` field. `block_hash` is not stored here — it is
 /// already carried in the record's fixed `hash` field, and is re-derived
@@ -54,12 +109,7 @@ fn encode_block(block: &Block) -> Vec<u8> {
 
     buf.extend_from_slice(&(block.transactions.len() as u32).to_le_bytes());
     for tx in &block.transactions {
-        buf.extend_from_slice(&tx.transaction.from);
-        buf.extend_from_slice(&tx.transaction.to);
-        buf.extend_from_slice(&tx.transaction.amount.to_le_bytes());
-        buf.extend_from_slice(&tx.transaction.nonce.to_le_bytes());
-        buf.extend_from_slice(&tx.public_key);
-        buf.extend_from_slice(&tx.signature);
+        buf.extend_from_slice(&encode_signed_transaction(tx));
     }
 
     buf
@@ -88,25 +138,19 @@ fn decode_block(payload: &[u8]) -> Result<Block, String> {
     );
 
     let tx_count = u32::from_le_bytes(read_array::<4>(payload, &mut cursor)?);
-    let mut transactions = Vec::with_capacity(tx_count as usize);
+    // `tx_count` is untrusted, attacker-controlled input -- pre-allocating
+    // `Vec::with_capacity(tx_count as usize)` before a single byte of the
+    // claimed transactions has actually been read would let 4 bytes of
+    // input request an arbitrarily large allocation (a denial-of-service,
+    // not a memory-safety bug, but a real crash: `Vec::with_capacity`
+    // aborts the process on allocation failure rather than returning an
+    // `Err`). Growing from empty means the only way to add an entry is to
+    // first successfully decode `TRANSACTION_RECORD_LEN` real bytes for
+    // it via `read_array`'s bounds check below.
+    let mut transactions = Vec::new();
     for _ in 0..tx_count {
-        let from: AccountId = read_array::<32>(payload, &mut cursor)?;
-        let to: AccountId = read_array::<32>(payload, &mut cursor)?;
-        let amount = Amount::from_le_bytes(read_array::<8>(payload, &mut cursor)?);
-        let nonce = Nonce::from_le_bytes(read_array::<8>(payload, &mut cursor)?);
-        let public_key: PublicKeyBytes = read_array::<32>(payload, &mut cursor)?;
-        let signature: SignatureBytes = read_array::<64>(payload, &mut cursor)?;
-
-        transactions.push(SignedTransaction {
-            transaction: UnsignedTransaction {
-                from,
-                to,
-                amount,
-                nonce,
-            },
-            public_key,
-            signature,
-        });
+        let record = read_array::<TRANSACTION_RECORD_LEN>(payload, &mut cursor)?;
+        transactions.push(decode_signed_transaction(&record).map_err(|err| err.to_string())?);
     }
 
     if cursor != payload.len() {
