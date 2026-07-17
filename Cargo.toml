@@ -1,3 +1,9 @@
+[package]
+name = "minerva-chain"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
 [workspace]
 members = [
     "crates/primitives",
@@ -12,3 +18,15 @@ members = [
     "crates/node",
 ]
 resolver = "2"
+
+[dev-dependencies]
+primitives = { path = "crates/primitives" }
+block = { path = "crates/block" }
+transaction = { path = "crates/transaction" }
+state = { path = "crates/state" }
+mempool = { path = "crates/mempool" }
+storage = { path = "crates/storage" }
+chain = { path = "crates/chain" }
+execution = { path = "crates/execution" }
+proptest = "1"
+tempfile = "3"
